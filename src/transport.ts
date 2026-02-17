@@ -14,6 +14,7 @@ import type {
   Transport,
   TransportOptions,
   TransportEvents,
+  TransportError,
   IncomingMessage,
   OutgoingMessage,
   RequestOptions,
@@ -118,7 +119,13 @@ export function createTransport(options: TransportOptions): Transport {
           if (response.code === schema.codes.success) {
             resolve(response);
           } else {
-            reject(response);
+            const error: TransportError = {
+              code: response.code,
+              description: response.description,
+              data: response.data,
+              response,
+            };
+            reject(error);
           }
           // Return true (or void) → auto-remove handler.
         },

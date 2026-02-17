@@ -8,8 +8,10 @@
 
 /** Maps protocol field names to the actual wire field names. */
 export interface ProtocolFields {
-  /** Field name for the API channel / operation. */
-  channel: string;
+  /** Wire field name for the channel on outgoing (request) messages. */
+  requestChannel: string;
+  /** Wire field name for the channel on incoming (response) messages. */
+  responseChannel: string;
   /** Field name for the unique message ID. */
   messageId: string;
   /** Field name for the bitmask response type. */
@@ -18,8 +20,10 @@ export interface ProtocolFields {
   code: string;
   /** Field name for the human-readable description. */
   description: string;
-  /** Field name for the data payload. */
-  data: string;
+  /** Wire field name for the data on outgoing (request) messages. */
+  payload: string;
+  /** Wire field name for the data on incoming (response) messages. */
+  body: string;
 }
 
 /** Result code values that have special meaning in the protocol. */
@@ -28,22 +32,49 @@ export interface ProtocolCodes {
   success: string;
   /** Value indicating an interim/partial response. */
   interim: string;
+  /** Value indicating a generic error. */
+  error: string;
+  /** Value indicating a validation failure. */
+  validationError: string;
+  /** Value indicating an authentication/authorization failure. */
+  unauthorized: string;
+  /** Value indicating a resource was not found. */
+  notFound: string;
+  /** Value indicating a server-side timeout. */
+  timeout: string;
+  /** Value indicating a rate limit was exceeded. */
+  rateLimited: string;
 }
 
 /** Bitmask flags for response type routing. */
 export interface ResponseTypes {
   /** No match / break (0). */
-  NONE: number;
+  none: number;
   /** No visual action (1). */
-  SILENT: number;
+  silent: number;
   /** Show toast/snackbar (2). */
-  MESSAGE: number;
+  message: number;
   /** Show/hide loading spinner (4). */
-  PROCESSING: number;
+  processing: number;
   /** Show modal/alert (8). */
-  ALERT: number;
+  alert: number;
   /** Match everything (15). */
-  ALL: number;
+  all: number;
+}
+
+/**
+ * Structured error returned when `request()` rejects due to a non-success response.
+ * Allows consumers to programmatically branch on the error code.
+ */
+export interface TransportError {
+  /** The protocol result code (e.g. the value from `ProtocolCodes.error`). */
+  code: string;
+  /** Human-readable description from the server. */
+  description: string;
+  /** Response data payload. */
+  data: Record<string, unknown>;
+  /** The full normalized incoming message for advanced inspection. */
+  response: IncomingMessage;
 }
 
 /**
@@ -66,7 +97,7 @@ export interface ProtocolSchema {
   /**
    * Whether outgoing `data` fields are flattened onto the root message object.
    * When true, `{ channel: 'x', data: { a: 1 } }` becomes `{ action: 'x', a: 1 }`.
-   * When false, data is nested under the data field name.
+   * When false, data is nested under the payload field name.
    */
   flattenOutgoing: boolean;
 }
@@ -81,7 +112,7 @@ export interface IncomingMessage {
   messageId: number;
   /** Bitmask response type. */
   type: number;
-  /** Result code (e.g. 'OK', 'NEUTRO', error codes). */
+  /** Result code (e.g. success, interim, or error codes). */
   code: string;
   /** Human-readable description. */
   description: string;

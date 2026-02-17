@@ -22,15 +22,26 @@ afterEach(() => {
 /** A complete test protocol. */
 const TEST_PROTOCOL: ProtocolSchema = {
   fields: {
-    channel:     'channel',
-    messageId:   'msgId',
-    type:        'type',
-    code:        'code',
-    description: 'desc',
-    data:        'data',
+    requestChannel:  'channel',
+    responseChannel: 'channel',
+    messageId:       'msgId',
+    type:            'type',
+    code:            'code',
+    description:     'desc',
+    payload:         'data',
+    body:            'data',
   },
-  codes: { success: 'OK', interim: 'PENDING' },
-  responseTypes: { NONE: 0, SILENT: 1, MESSAGE: 2, PROCESSING: 4, ALERT: 8, ALL: 15 },
+  codes: {
+    success:         'OK',
+    interim:         'PENDING',
+    error:           'ERROR',
+    validationError: 'VALIDATION_ERROR',
+    unauthorized:    'UNAUTHORIZED',
+    notFound:        'NOT_FOUND',
+    timeout:         'TIMEOUT',
+    rateLimited:     'RATE_LIMITED',
+  },
+  responseTypes: { none: 0, silent: 1, message: 2, processing: 4, alert: 8, all: 15 },
   generateId: () => Math.floor(Math.random() * 1_000_000_000) + 1,
   encode: (msg) => JSON.stringify(msg),
   decode: (raw) => { try { return JSON.parse(raw); } catch { return null; } },
@@ -59,7 +70,7 @@ function lastSentId(): number {
 describe('createTransport', () => {
   it('creates transport with provided protocol', () => {
     const t = createTransport({ url: 'ws://x', protocol: TEST_PROTOCOL, reconnect: false });
-    expect(t.protocol.fields.channel).toBe('channel');
+    expect(t.protocol.fields.requestChannel).toBe('channel');
     expect(t.state).toBe('disconnected');
     t.destroy();
   });
@@ -67,7 +78,7 @@ describe('createTransport', () => {
   it('creates transport with custom field names', () => {
     const customProtocol: ProtocolSchema = {
       ...TEST_PROTOCOL,
-      fields: { ...TEST_PROTOCOL.fields, channel: 'action' },
+      fields: { ...TEST_PROTOCOL.fields, requestChannel: 'action', responseChannel: 'action' },
       flattenOutgoing: false,
     };
     const t = createTransport({
@@ -75,7 +86,7 @@ describe('createTransport', () => {
       protocol: customProtocol,
       reconnect: false,
     });
-    expect(t.protocol.fields.channel).toBe('action');
+    expect(t.protocol.fields.requestChannel).toBe('action');
     expect(t.protocol.flattenOutgoing).toBe(false);
     t.destroy();
   });
@@ -119,7 +130,7 @@ describe('request()', () => {
       data: {},
     });
 
-    await expect(promise).rejects.toMatchObject({ code: 'ERROR' });
+    await expect(promise).rejects.toMatchObject({ code: 'ERROR', description: 'Not found' });
     t.destroy();
   });
 
@@ -290,7 +301,7 @@ describe('protocol', () => {
   it('exposes read-only protocol on transport', () => {
     const t = connected();
     expect(t.protocol).toBe(t.protocol); // same reference
-    expect(t.protocol.responseTypes.ALL).toBe(15);
+    expect(t.protocol.responseTypes.all).toBe(15);
     t.destroy();
   });
 });

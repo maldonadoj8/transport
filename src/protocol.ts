@@ -25,12 +25,12 @@ export function normalizeIncoming(
 ): IncomingMessage {
   const f = schema.fields;
   return {
-    channel:     String(raw[f.channel]     ?? ''),
-    messageId:   Number(raw[f.messageId]   ?? 0),
-    type:        Number(raw[f.type]        ?? 0),
-    code:        String(raw[f.code]        ?? ''),
-    description: String(raw[f.description] ?? ''),
-    data:        (raw[f.data] as Record<string, unknown>) ?? {},
+    channel:     String(raw[f.responseChannel] ?? ''),
+    messageId:   Number(raw[f.messageId]       ?? 0),
+    type:        Number(raw[f.type]            ?? 0),
+    code:        String(raw[f.code]            ?? ''),
+    description: String(raw[f.description]     ?? ''),
+    data:        (raw[f.body] as Record<string, unknown>) ?? {},
     raw,
   };
 }
@@ -50,7 +50,7 @@ export function buildOutgoing(
 ): Record<string, unknown> {
   const f = schema.fields;
   const wire: Record<string, unknown> = {
-    [f.channel]: msg.channel,
+    [f.requestChannel]: msg.channel,
     [f.messageId]: messageId,
   };
 
@@ -62,7 +62,7 @@ export function buildOutgoing(
       }
     } else {
       // Nested: data goes under its own field.
-      wire[f.data] = msg.data;
+      wire[f.payload] = msg.data;
     }
   }
 

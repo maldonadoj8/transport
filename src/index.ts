@@ -34,7 +34,15 @@ export type {
   TransportOptions,
   TransportState,
   TransportEvents,
+  TransportError,
   ReconnectOptions,
   RequestOptions,
   FireOptions,
 } from './types.js';
+
+// Convenience alias: typed emitter bound to TransportEvents.
+import type { Emitter } from './events.js';
+import type { TransportEvents } from './types.js';
+
+/** A pre-bound Emitter type for transport lifecycle events. */
+export type TransportEmitter = Emitter<TransportEvents>;

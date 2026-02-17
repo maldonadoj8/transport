@@ -15,24 +15,32 @@ import type { ProtocolSchema } from '../src/types.js';
 function testProtocol(overrides?: Partial<ProtocolSchema>): ProtocolSchema {
   return {
     fields: {
-      channel:     'action',
-      messageId:   'reqId',
-      type:        'type',
-      code:        'status',
-      description: 'desc',
-      data:        'payload',
+      requestChannel:  'action',
+      responseChannel: 'action',
+      messageId:       'reqId',
+      type:            'type',
+      code:            'status',
+      description:     'desc',
+      payload:         'payload',
+      body:            'payload',
     },
     codes: {
-      success: 'OK',
-      interim: 'PENDING',
+      success:         'OK',
+      interim:         'PENDING',
+      error:           'ERROR',
+      validationError: 'VALIDATION_ERROR',
+      unauthorized:    'UNAUTHORIZED',
+      notFound:        'NOT_FOUND',
+      timeout:         'TIMEOUT',
+      rateLimited:     'RATE_LIMITED',
     },
     responseTypes: {
-      NONE:       0,
-      SILENT:     1,
-      MESSAGE:    2,
-      PROCESSING: 4,
-      ALERT:      8,
-      ALL:        15,
+      none:       0,
+      silent:     1,
+      message:    2,
+      processing: 4,
+      alert:      8,
+      all:        15,
     },
     generateId(): number {
       return Math.floor(Math.random() * 1_000_000_000) + 1;
@@ -78,12 +86,14 @@ describe('normalizeIncoming', () => {
   it('uses custom field names', () => {
     const schema = testProtocol({
       fields: {
-        channel: 'op',
+        requestChannel:  'cmd',
+        responseChannel: 'op',
         messageId: 'id',
         type: 'kind',
         code: 'result',
         description: 'text',
-        data: 'body',
+        payload: 'input',
+        body: 'body',
       },
     });
     const raw = { op: 'test', id: 99, result: 'OK' };
@@ -146,12 +156,14 @@ describe('buildOutgoing', () => {
   it('uses custom field names', () => {
     const schema = testProtocol({
       fields: {
-        channel: 'cmd',
+        requestChannel:  'cmd',
+        responseChannel: 'op',
         messageId: 'mid',
         type: 'type',
         code: 'code',
         description: 'desc',
-        data: 'data',
+        payload: 'data',
+        body: 'data',
       },
     });
     const wire = buildOutgoing({ channel: 'test' }, 7, schema);
