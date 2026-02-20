@@ -25,7 +25,6 @@ const TEST_PROTOCOL: ProtocolSchema = {
     requestChannel:  'channel',
     responseChannel: 'channel',
     messageId:       'msgId',
-    type:            'type',
     code:            'code',
     description:     'desc',
     payload:         'data',
@@ -34,14 +33,8 @@ const TEST_PROTOCOL: ProtocolSchema = {
   codes: {
     success:         'OK',
     interim:         'PENDING',
-    error:           'ERROR',
-    validationError: 'VALIDATION_ERROR',
-    unauthorized:    'UNAUTHORIZED',
-    notFound:        'NOT_FOUND',
-    timeout:         'TIMEOUT',
-    rateLimited:     'RATE_LIMITED',
+    error:           ['ERROR'],
   },
-  responseTypes: { none: 0, silent: 1, message: 2, processing: 4, alert: 8, all: 15 },
   generateId: () => Math.floor(Math.random() * 1_000_000_000) + 1,
   encode: (msg) => JSON.stringify(msg),
   decode: (raw) => { try { return JSON.parse(raw); } catch { return null; } },
@@ -127,7 +120,26 @@ describe('send', () => {
     expect(ws.sent.length).toBe(1);
     const parsed = JSON.parse(ws.sent[0]);
     expect(parsed.channel).toBe('ping');
+  });
+
+  it('sends encoded JSON with msgId when includeIdInRequest=true', () => {
+    const protocol = { ...TEST_PROTOCOL, includeIdInRequest: true };
+    const t = createTransport({
+      url: 'ws://test.local/ws',
+      protocol,
+      reconnect: false,
+    });
+    t.connect();
+    lastInstance()!.simulateOpen();
+
+    t.send({ channel: 'ping' });
+
+    const ws = lastInstance()!;
+    expect(ws.sent.length).toBe(1);
+    const parsed = JSON.parse(ws.sent[0]);
+    expect(parsed.channel).toBe('ping');
     expect(typeof parsed.msgId).toBe('number');
+    t.destroy();
   });
 
   it('emits send:error when not connected', () => {
@@ -168,7 +180,6 @@ describe('message routing', () => {
     ws.simulateMessage({
       channel: 'usuario',
       msgId: 0,
-      type: 1,
       code: 'OK',
       desc: 'ok',
       data: { usuario: [{ id: 1 }] },
@@ -190,7 +201,6 @@ describe('message routing', () => {
     ws.simulateMessage({
       channel: 'unknown',
       msgId: 0,
-      type: 1,
       code: 'OK',
       desc: '',
       data: {},
@@ -210,7 +220,7 @@ describe('message routing', () => {
     t.connect();
     const ws = lastInstance()!;
     ws.simulateOpen();
-    ws.simulateMessage({ channel: 'ping', msgId: 0, type: 1, code: 'OK', desc: '', data: {} });
+    ws.simulateMessage({ channel: 'ping', msgId: 0, code: 'OK', desc: '', data: {} });
 
     expect(rawFn).toHaveBeenCalledTimes(1);
     expect(parsedFn).toHaveBeenCalledTimes(1);
@@ -227,6 +237,61 @@ describe('message routing', () => {
     ws.simulateMessage('not json at all }{');
 
     expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('routes messages with no channel but valid messageId via ID-only fallback', async () => {
+    const protocol = {
+      ...TEST_PROTOCOL,
+      includeIdInRequest: true,
+    };
+    const t = createTransport({
+      url: 'ws://test.local/ws',
+      protocol,
+      reconnect: false,
+    });
+    t.connect();
+    const ws = lastInstance()!;
+    ws.simulateOpen();
+
+    // Send a request so an ephemeral handler is registered.
+    const promise = t.request({ channel: 'market_subscribe' });
+    const sent = JSON.parse(ws.sent[ws.sent.length - 1]);
+    const msgId = sent.msgId;
+
+    // Response arrives with no channel, only the echoed msgId.
+    ws.simulateMessage({
+      msgId,
+      code: 'OK',
+      desc: 'subscribed',
+      data: { status: 'success' },
+    });
+
+    const res = await promise;
+    expect(res.code).toBe('OK');
+    expect(res.data).toEqual({ status: 'success' });
+    t.destroy();
+  });
+
+  it('drops messages with no channel AND no messageId', () => {
+    const t = makeTransport();
+    const fn = vi.fn();
+    t.on('message:unhandled', fn);
+    t.on('message:parsed', fn);
+
+    t.connect();
+    const ws = lastInstance()!;
+    ws.simulateOpen();
+    ws.simulateMessage({
+      code: 'OK',
+      desc: '',
+      data: {},
+    });
+
+    // With the '*' wildcard fallback, channel-less messages now resolve
+    // to '*' and pass through the gate. They reach handlers but since
+    // nothing is registered on '*', they end up as unhandled.
+    // Events: message:parsed + message:unhandled = 2.
+    expect(fn).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -5,7 +5,9 @@
 Designed as the communication companion to `@silas/core` (state management). Both libraries work together but are fully decoupled — use either one independently.
 
 - **Injectable protocol** — configure wire field names, codes, serialization, and ID generation. No built-in defaults — you define the entire schema.
+- **Channel-optional** — protocols that use named channels (like internal APIs) and channel-less protocols (like WhiteBit, Binance) both work out of the box.
 - **Unified handlers** — persistent (server pushes) and ephemeral (request/response) in a single registry with automatic cleanup.
+- **ID-based routing** — responses are matched to requests by message ID, with a secondary index fallback for protocols that omit channel fields in responses.
 - **Three send modes** — `request()` (Promise), `fire()` (callback), `send()` (fire-and-forget).
 - **Auto-reconnect** — configurable delay, max attempts, and backoff strategy.
 - **Typed events** — lifecycle hooks via a typed event emitter instead of setter functions.
@@ -24,15 +26,19 @@ import type { ProtocolSchema } from '@silas/transport';
 
 const protocol: ProtocolSchema = {
   fields: {
-    channel:     'action',
-    messageId:   'reqId',
-    type:        'type',
-    code:        'status',
-    description: 'desc',
-    data:        'payload',
+    requestChannel:  'action',   // wire field for channel on outgoing messages
+    responseChannel: 'action',   // wire field for channel on incoming messages
+    messageId:       'reqId',    // wire field for the unique message ID
+    code:            'status',   // wire field for result code
+    description:     'desc',     // wire field for human-readable description
+    payload:         'payload',  // wire field for data on outgoing messages
+    body:            'payload',  // wire field for data on incoming messages
   },
-  codes: { success: 'OK', interim: 'PENDING' },
-  responseTypes: { NONE: 0, SILENT: 1, MESSAGE: 2, PROCESSING: 4, ALERT: 8, ALL: 15 },
+  codes: {
+    success: 'OK',
+    interim: 'PENDING',
+    error:   ['FAIL'],
+  },
   generateId: () => Math.floor(Math.random() * 1_000_000_000) + 1,
   encode: (msg) => JSON.stringify(msg),
   decode: (raw) => { try { return JSON.parse(raw); } catch { return null; } },
@@ -59,6 +65,50 @@ transport.addHandler('entrega', 'sync', (msg) => {
 });
 ```
 
+## Channel-less Protocols
+
+Not all WebSocket APIs use channel fields. For protocols like WhiteBit or Binance where routing is done purely by message ID, simply omit `requestChannel` and `responseChannel`:
+
+```ts
+const whitebitProtocol: ProtocolSchema = {
+  fields: {
+    // No requestChannel or responseChannel — routing is ID-based only.
+    messageId:   'id',
+    code:        'status',     // not used by WhiteBit, but required field
+    description: 'error',
+    payload:     'params',
+    body:        'result',
+  },
+  // No codes — all responses are treated as success.
+  generateId: () => Math.floor(Math.random() * 1_000_000_000) + 1,
+  encode: (msg) => JSON.stringify(msg),
+  decode: (raw) => { try { return JSON.parse(raw); } catch { return null; } },
+  flattenOutgoing: false,
+  includeIdInRequest: true,    // WhiteBit expects the ID on the wire
+};
+
+const transport = createTransport({
+  url: 'wss://api.whitebit.com/ws',
+  protocol: whitebitProtocol,
+});
+
+transport.connect();
+
+// No channel needed — just send data
+const res = await transport.request({
+  data: { method: 'server.ping', params: [] },
+});
+console.log(res.data); // { result: 'pong' }
+```
+
+Internally, channel-less messages use the wildcard `'*'` for handler routing. You can register persistent handlers on `'*'` to receive spontaneous server pushes:
+
+```ts
+transport.addHandler('*', 'push-listener', (msg) => {
+  console.log('Server push:', msg.data);
+});
+```
+
 ## Send Modes
 
 ### `request()` — Promise-based
@@ -74,7 +124,7 @@ try {
   console.log(res.code); // 'OK'
   console.log(res.data); // server payload
 } catch (err) {
-  // err is the IncomingMessage on failure, or an Error on timeout
+  // err is a TransportError on failure, or an Error on timeout
 }
 ```
 
@@ -86,7 +136,7 @@ Return `false` to keep listening (interim pattern).
 const unsub = transport.fire(
   { channel: 'proceso', data: { id: 1 } },
   (msg) => {
-    if (msg.code === protocol.codes.interim) {
+    if (msg.code === 'PENDING') {
       console.log('Still processing...');
       return false; // keep listening
     }
@@ -126,77 +176,132 @@ unsub(); // or transport.removeHandler('entrega', 'my-sync')
 
 Ephemeral handlers auto-remove when the callback returns `true` or `void`. Return `false` to keep alive (interim pattern).
 
+### Handler Routing
+
+Messages are routed through a 4-step priority chain:
+
+1. **Ephemeral by (channel, messageId)** — exact match for request/response pairs
+2. **Persistent by channel** — all matching handlers execute
+3. **ID-only fallback** — if the message has a `messageId` but no matching channel, a secondary index resolves the original channel (useful when responses omit the channel field)
+4. **Unhandled** — emits `message:unhandled` event
+
 ## Protocol Schema
 
-You must provide a complete `ProtocolSchema` when creating a transport. There are no built-in defaults.
+You must provide a `ProtocolSchema` when creating a transport. There are no built-in defaults.
+
+### `ProtocolFields`
+
+Maps canonical field names to actual wire field names:
+
+| Field | Required | Description |
+|---|---|---|
+| `requestChannel` | No | Wire field for channel on outgoing messages. Omit for channel-less protocols. |
+| `responseChannel` | No | Wire field for channel on incoming messages. Omit for channel-less protocols. |
+| `subscriptionChannel` | No | Fallback channel field for subscription/event messages (e.g. Binance `"e"`). |
+| `messageId` | Yes | Wire field for the unique message ID. |
+| `code` | Yes | Wire field for the result code. |
+| `description` | Yes | Wire field for human-readable description. |
+| `payload` | Yes | Wire field for data on outgoing messages. |
+| `body` | Yes | Wire field for data on incoming messages. |
+
+### `ProtocolCodes`
+
+All fields are optional. When the entire `codes` object is omitted, all responses resolve immediately:
+
+| Field | Type | Description |
+|---|---|---|
+| `success` | `string` | Value indicating success. When undefined, all non-interim/non-error responses succeed. |
+| `interim` | `string` | Value indicating an interim/partial response (keep listening). |
+| `error` | `string[]` | Value(s) indicating an error. Multiple codes supported. |
+
+### `ProtocolSchema`
+
+| Field | Required | Description |
+|---|---|---|
+| `fields` | Yes | Maps canonical field names to wire field names. |
+| `codes` | No | Special result code values for classification. |
+| `generateId` | Yes | Function that generates a unique numeric message ID. |
+| `encode` | Yes | Serialize a message object to a string for the wire. |
+| `decode` | Yes | Deserialize a raw wire string to an object (return `null` on failure). |
+| `flattenOutgoing` | Yes | `true` = spread data onto root; `false` = nest under payload field. |
+| `includeIdInRequest` | No | `true` = include messageId on the wire; `false` (default) = ID used internally only. |
+
+### Example: Channel-based Protocol
 
 ```ts
-import type { ProtocolSchema } from '@silas/transport';
-
 const protocol: ProtocolSchema = {
   fields: {
-    channel:     'action',     // wire field for the channel/operation name
-    messageId:   'reqId',      // wire field for the unique message ID
-    type:        'type',       // wire field for bitmask response type
-    code:        'status',     // wire field for result code
-    description: 'desc',       // wire field for human-readable description
-    data:        'payload',    // wire field for data payload
+    requestChannel:  'action',
+    responseChannel: 'action',
+    messageId:       'reqId',
+    code:            'status',
+    description:     'desc',
+    payload:         'payload',
+    body:            'payload',
   },
   codes: {
-    success: 'OK',             // result code indicating success
-    interim: 'PENDING',        // result code indicating interim/partial response
-  },
-  responseTypes: {
-    NONE:       0,
-    SILENT:     1,
-    MESSAGE:    2,
-    PROCESSING: 4,
-    ALERT:      8,
-    ALL:        15,
+    success: 'OK',
+    interim: 'PENDING',
+    error:   ['ERROR'],
   },
   generateId: () => Math.floor(Math.random() * 1_000_000_000) + 1,
   encode: (msg) => JSON.stringify(msg),
   decode: (raw) => { try { return JSON.parse(raw); } catch { return null; } },
-  flattenOutgoing: true,       // true = flatten data onto root; false = nest under data field
+  flattenOutgoing: true,
+};
+```
+
+### Example: Channel-less Protocol (WhiteBit-style)
+
+```ts
+const protocol: ProtocolSchema = {
+  fields: {
+    messageId:   'id',
+    code:        'status',
+    description: 'error',
+    payload:     'params',
+    body:        'result',
+  },
+  generateId: () => Math.floor(Math.random() * 1_000_000_000) + 1,
+  encode: (msg) => JSON.stringify(msg),
+  decode: (raw) => { try { return JSON.parse(raw); } catch { return null; } },
+  flattenOutgoing: false,
+  includeIdInRequest: true,
 };
 ```
 
 ### Wire Formats
 
-**Outgoing (data flattened, `flattenOutgoing: true`)**:
+**Outgoing (channel-based, data flattened)**:
 ```json
 { "action": "usuario", "reqId": 742381923, "id": 5, "nombre": "Ana" }
 ```
 
-**Outgoing (data nested, `flattenOutgoing: false`)**:
+**Outgoing (channel-based, data nested)**:
 ```json
 { "action": "usuario", "reqId": 742381923, "payload": { "id": 5, "nombre": "Ana" } }
 ```
 
-**Incoming**:
+**Outgoing (channel-less)**:
+```json
+{ "id": 742381923, "params": { "method": "server.ping" } }
+```
+
+**Incoming (channel-based)**:
 ```json
 {
   "action": "usuario",
   "reqId": 742381923,
-  "type": 2,
   "status": "OK",
   "desc": "Success",
   "payload": { "usuario": [{ "id": 5, "nombre": "Ana" }] }
 }
 ```
 
-### Response Type Bitmask
-
-| Flag | Value | Meaning |
-|---|---|---|
-| `NONE` | 0 | No match |
-| `SILENT` | 1 | No visual action |
-| `MESSAGE` | 2 | Show toast/snackbar |
-| `PROCESSING` | 4 | Show/hide spinner |
-| `ALERT` | 8 | Show modal |
-| `ALL` | 15 | Match all types |
-
-Access via `transport.protocol.responseTypes.MESSAGE`.
+**Incoming (channel-less)**:
+```json
+{ "id": 742381923, "result": { "pong": true } }
+```
 
 ## Events
 
@@ -267,7 +372,7 @@ const transport = createTransport({
 
 // Bridge: classify incoming data into the store
 transport.on('message:parsed', (msg) => {
-  if (msg.code === protocol.codes.success && msg.data) {
+  if (msg.data) {
     store.classify(msg.data);
   }
 });
@@ -314,6 +419,30 @@ transport.connect();
 |---|---|
 | `createEmitter<T>()` | Typed event emitter factory |
 | `createHandlerStore()` | Handler registry factory |
+
+### Types
+
+All types are exported for consumers:
+
+```ts
+import type {
+  ProtocolSchema,
+  ProtocolFields,
+  ProtocolCodes,
+  IncomingMessage,
+  OutgoingMessage,
+  Handler,
+  HandlerCallback,
+  Transport,
+  TransportOptions,
+  TransportState,
+  TransportEvents,
+  TransportError,
+  ReconnectOptions,
+  RequestOptions,
+  FireOptions,
+} from '@silas/transport';
+```
 
 ## License
 

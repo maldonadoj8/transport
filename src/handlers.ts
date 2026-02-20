@@ -38,6 +38,9 @@ export interface HandlerStore {
   /** Check if an ephemeral handler exists for (channel, messageId). */
   hasEphemeral(channel: string, messageId: number): boolean;
 
+  /** Look up the channel for a given messageId via the secondary index. */
+  findChannelByMessageId(messageId: number): string | undefined;
+
   /** Clear all handlers. */
   clear(): void;
 
@@ -59,6 +62,8 @@ export interface HandlerStore {
 export function createHandlerStore(): HandlerStore {
   const ephemeral  = new Map<string, Map<number, Handler>>();
   const persistent = new Map<string, Map<string, Handler>>();
+  /** Secondary index: messageId → channel for O(1) ID-only lookups. */
+  const idToChannel = new Map<number, string>();
 
   // ---- helpers ----
 
@@ -83,6 +88,7 @@ export function createHandlerStore(): HandlerStore {
   ): () => void {
     if (handler.type === 'ephemeral' && typeof key === 'number') {
       getEphemeralMap(channel).set(key, handler);
+      idToChannel.set(key, channel);
     } else if (handler.type === 'persistent' && typeof key === 'string') {
       getPersistentMap(channel).set(key, handler);
     } else {
@@ -101,6 +107,7 @@ export function createHandlerStore(): HandlerStore {
       const map = ephemeral.get(channel);
       if (!map) return false;
       const deleted = map.delete(key);
+      if (deleted) idToChannel.delete(key);
       if (map.size === 0) ephemeral.delete(channel);
       return deleted;
     } else {
@@ -116,7 +123,7 @@ export function createHandlerStore(): HandlerStore {
     const channel = message.channel;
     const msgId = message.messageId;
 
-    // 1. Try ephemeral handler (exact messageId match).
+    // 1. Try ephemeral handler (exact channel + messageId match).
     const ephMap = ephemeral.get(channel);
     if (ephMap && msgId !== 0) {
       const handler = ephMap.get(msgId);
@@ -125,6 +132,7 @@ export function createHandlerStore(): HandlerStore {
         // Auto-remove unless callback explicitly returns false (interim).
         if (result !== false) {
           ephMap.delete(msgId);
+          idToChannel.delete(msgId);
           if (ephMap.size === 0) ephemeral.delete(channel);
         }
         return true;
@@ -140,7 +148,28 @@ export function createHandlerStore(): HandlerStore {
       return true;
     }
 
-    // 3. Unhandled.
+    // 3. ID-only fallback: response arrived with no channel (or wrong channel)
+    //    but has a messageId — look up the original channel via secondary index.
+    if (msgId !== 0) {
+      const resolvedChannel = idToChannel.get(msgId);
+      if (resolvedChannel && resolvedChannel !== channel) {
+        const fallbackMap = ephemeral.get(resolvedChannel);
+        if (fallbackMap) {
+          const handler = fallbackMap.get(msgId);
+          if (handler) {
+            const result = handler.callback(message);
+            if (result !== false) {
+              fallbackMap.delete(msgId);
+              idToChannel.delete(msgId);
+              if (fallbackMap.size === 0) ephemeral.delete(resolvedChannel);
+            }
+            return true;
+          }
+        }
+      }
+    }
+
+    // 4. Unhandled.
     return false;
   }
 
@@ -151,15 +180,29 @@ export function createHandlerStore(): HandlerStore {
   function clear(): void {
     ephemeral.clear();
     persistent.clear();
+    idToChannel.clear();
   }
 
   function clearStale(channel?: string): void {
     if (channel) {
+      // Remove index entries for this channel's ephemeral handlers.
+      const map = ephemeral.get(channel);
+      if (map) {
+        for (const msgId of map.keys()) {
+          idToChannel.delete(msgId);
+        }
+      }
       ephemeral.delete(channel);
     } else {
+      // Clear all ephemeral + index.
       ephemeral.clear();
+      idToChannel.clear();
     }
   }
 
-  return { add, remove, execute, hasEphemeral, clear, clearStale };
+  function findChannelByMessageId(messageId: number): string | undefined {
+    return idToChannel.get(messageId);
+  }
+
+  return { add, remove, execute, hasEphemeral, findChannelByMessageId, clear, clearStale };
 }

@@ -6,7 +6,7 @@
 export { createTransport } from './transport.js';
 
 // Protocol
-export { normalizeIncoming, buildOutgoing } from './protocol.js';
+export { normalizeIncoming, buildOutgoing, resolveSchema } from './protocol.js';
 
 // Events
 export { createEmitter } from './events.js';
@@ -20,9 +20,9 @@ export type { HandlerStore } from './handlers.js';
 export type {
   // Protocol
   ProtocolSchema,
+  ResolvedProtocolSchema,
   ProtocolFields,
   ProtocolCodes,
-  ResponseTypes,
   // Messages
   IncomingMessage,
   OutgoingMessage,

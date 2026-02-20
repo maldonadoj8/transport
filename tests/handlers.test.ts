@@ -10,7 +10,6 @@ function makeMsg(overrides: Partial<IncomingMessage> = {}): IncomingMessage {
   return {
     channel: 'test',
     messageId: 1,
-    type: 0,
     code: 'OK',
     description: '',
     data: {},
@@ -229,5 +228,92 @@ describe('createHandlerStore', () => {
     expect(() =>
       store.add('x', 42, { type: 'persistent', callback: () => {} }),
     ).toThrow('Invalid handler registration');
+  });
+
+  // ---- ID-only fallback ----
+
+  it('routes by messageId alone when channel does not match', () => {
+    const store = createHandlerStore();
+    const fn = vi.fn();
+    // Register ephemeral handler on channel 'market_subscribe' with msgId 42.
+    store.add('market_subscribe', 42, { type: 'ephemeral', callback: fn });
+
+    // Response arrives with empty channel but matching messageId.
+    const msg = makeMsg({ channel: '', messageId: 42 });
+    const handled = store.execute(msg);
+
+    expect(handled).toBe(true);
+    expect(fn).toHaveBeenCalledWith(msg);
+  });
+
+  it('ID-only fallback auto-removes ephemeral handler', () => {
+    const store = createHandlerStore();
+    const fn = vi.fn();
+    store.add('market_subscribe', 42, { type: 'ephemeral', callback: fn });
+
+    store.execute(makeMsg({ channel: '', messageId: 42 }));
+    // Handler should be auto-removed.
+    const handled = store.execute(makeMsg({ channel: '', messageId: 42 }));
+
+    expect(handled).toBe(false);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('ID-only fallback respects interim (false return)', () => {
+    const store = createHandlerStore();
+    let calls = 0;
+    const fn = vi.fn(() => {
+      calls++;
+      return calls < 2 ? false : true;
+    });
+    store.add('ch', 99, { type: 'ephemeral', callback: fn });
+
+    // First call returns false — handler stays.
+    store.execute(makeMsg({ channel: '', messageId: 99 }));
+    expect(store.hasEphemeral('ch', 99)).toBe(true);
+
+    // Second call returns true — handler removed.
+    store.execute(makeMsg({ channel: '', messageId: 99 }));
+    expect(store.hasEphemeral('ch', 99)).toBe(false);
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  // ---- findChannelByMessageId ----
+
+  it('findChannelByMessageId returns channel for registered ephemeral', () => {
+    const store = createHandlerStore();
+    store.add('usuario', 42, { type: 'ephemeral', callback: () => {} });
+    expect(store.findChannelByMessageId(42)).toBe('usuario');
+  });
+
+  it('findChannelByMessageId returns undefined for unknown messageId', () => {
+    const store = createHandlerStore();
+    expect(store.findChannelByMessageId(999)).toBeUndefined();
+  });
+
+  it('findChannelByMessageId clears on remove', () => {
+    const store = createHandlerStore();
+    store.add('usuario', 42, { type: 'ephemeral', callback: () => {} });
+    store.remove('usuario', 42);
+    expect(store.findChannelByMessageId(42)).toBeUndefined();
+  });
+
+  it('findChannelByMessageId clears on clear()', () => {
+    const store = createHandlerStore();
+    store.add('a', 1, { type: 'ephemeral', callback: () => {} });
+    store.add('b', 2, { type: 'ephemeral', callback: () => {} });
+    store.clear();
+    expect(store.findChannelByMessageId(1)).toBeUndefined();
+    expect(store.findChannelByMessageId(2)).toBeUndefined();
+  });
+
+  it('findChannelByMessageId clears on clearStale()', () => {
+    const store = createHandlerStore();
+    store.add('a', 1, { type: 'ephemeral', callback: () => {} });
+    store.add('b', 2, { type: 'ephemeral', callback: () => {} });
+    store.clearStale('a');
+    expect(store.findChannelByMessageId(1)).toBeUndefined();
+    // Channel 'b' should still be indexed.
+    expect(store.findChannelByMessageId(2)).toBe('b');
   });
 });

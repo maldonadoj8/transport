@@ -25,7 +25,6 @@ const TEST_PROTOCOL: ProtocolSchema = {
     requestChannel:  'channel',
     responseChannel: 'channel',
     messageId:       'msgId',
-    type:            'type',
     code:            'code',
     description:     'desc',
     payload:         'data',
@@ -34,18 +33,18 @@ const TEST_PROTOCOL: ProtocolSchema = {
   codes: {
     success:         'OK',
     interim:         'PENDING',
-    error:           'ERROR',
-    validationError: 'VALIDATION_ERROR',
-    unauthorized:    'UNAUTHORIZED',
-    notFound:        'NOT_FOUND',
-    timeout:         'TIMEOUT',
-    rateLimited:     'RATE_LIMITED',
+    error:           ['ERROR'],
   },
-  responseTypes: { none: 0, silent: 1, message: 2, processing: 4, alert: 8, all: 15 },
   generateId: () => Math.floor(Math.random() * 1_000_000_000) + 1,
   encode: (msg) => JSON.stringify(msg),
   decode: (raw) => { try { return JSON.parse(raw); } catch { return null; } },
   flattenOutgoing: true,
+};
+
+/** Protocol with includeIdInRequest for tests that need to read msgId from the wire. */
+const PROTOCOL_WITH_ID: ProtocolSchema = {
+  ...TEST_PROTOCOL,
+  includeIdInRequest: true,
 };
 
 function connected(overrides?: Partial<Parameters<typeof createTransport>[0]>): Transport {
@@ -92,9 +91,37 @@ describe('createTransport', () => {
   });
 });
 
+describe('send()', () => {
+  it('does not include messageId on wire by default', () => {
+    const t = connected();
+    t.send({ channel: 'ping' });
+
+    const ws = lastInstance()!;
+    const parsed = JSON.parse(ws.sent[ws.sent.length - 1]);
+    expect(parsed.channel).toBe('ping');
+    expect(parsed).not.toHaveProperty('msgId');
+    t.destroy();
+  });
+
+  it('includes messageId on wire when includeIdInRequest=true', () => {
+    const t = connected({
+      protocol: { ...TEST_PROTOCOL, includeIdInRequest: true },
+    });
+    t.send({ channel: 'ping' });
+
+    const ws = lastInstance()!;
+    const parsed = JSON.parse(ws.sent[ws.sent.length - 1]);
+    expect(parsed.channel).toBe('ping');
+    expect(typeof parsed.msgId).toBe('number');
+    t.destroy();
+  });
+});
+
 describe('request()', () => {
   it('resolves on success response', async () => {
-    const t = connected();
+    const t = connected({
+      protocol: PROTOCOL_WITH_ID,
+    });
 
     const promise = t.request({ channel: 'usuario', data: { id: 5 } });
     const msgId = lastSentId();
@@ -103,7 +130,6 @@ describe('request()', () => {
     lastInstance()!.simulateMessage({
       channel: 'usuario',
       msgId,
-      type: 1,
       code: 'OK',
       desc: 'Success',
       data: { usuario: [{ id: 5, nombre: 'Ana' }] },
@@ -116,7 +142,9 @@ describe('request()', () => {
   });
 
   it('rejects on failure response', async () => {
-    const t = connected();
+    const t = connected({
+      protocol: PROTOCOL_WITH_ID,
+    });
 
     const promise = t.request({ channel: 'usuario', data: { id: 999 } });
     const msgId = lastSentId();
@@ -124,18 +152,19 @@ describe('request()', () => {
     lastInstance()!.simulateMessage({
       channel: 'usuario',
       msgId,
-      type: 2,
       code: 'ERROR',
       desc: 'Not found',
       data: {},
     });
 
-    await expect(promise).rejects.toMatchObject({ code: 'ERROR', description: 'Not found' });
+    await expect(promise).rejects.toMatchObject({ code: 'ERROR', response: { description: 'Not found' } });
     t.destroy();
   });
 
   it('handles interim response without resolving', async () => {
-    const t = connected();
+    const t = connected({
+      protocol: PROTOCOL_WITH_ID,
+    });
 
     const promise = t.request({ channel: 'proceso' });
     const msgId = lastSentId();
@@ -145,7 +174,6 @@ describe('request()', () => {
     ws.simulateMessage({
       channel: 'proceso',
       msgId,
-      type: 4,
       code: 'PENDING',
       desc: 'Processing...',
       data: {},
@@ -161,7 +189,6 @@ describe('request()', () => {
     ws.simulateMessage({
       channel: 'proceso',
       msgId,
-      type: 1,
       code: 'OK',
       desc: 'Done',
       data: { resultado: true },
@@ -169,6 +196,30 @@ describe('request()', () => {
 
     const res = await promise;
     expect(res.code).toBe('OK');
+    t.destroy();
+  });
+
+  it('resolves via ID-only fallback when response has no channel', async () => {
+    const t = connected({
+      protocol: { ...TEST_PROTOCOL, includeIdInRequest: true },
+    });
+
+    const promise = t.request({ channel: 'market_subscribe' });
+    const ws = lastInstance()!;
+    const sent = JSON.parse(ws.sent[ws.sent.length - 1]);
+    const msgId = sent.msgId;
+
+    // Server responds with only the ID, no channel field.
+    ws.simulateMessage({
+      msgId,
+      code: 'OK',
+      desc: 'ok',
+      data: { status: 'success' },
+    });
+
+    const res = await promise;
+    expect(res.code).toBe('OK');
+    expect(res.data).toEqual({ status: 'success' });
     t.destroy();
   });
 
@@ -187,9 +238,140 @@ describe('request()', () => {
   });
 });
 
+describe('request() codes variations', () => {
+  it('resolves all responses when codes is omitted', async () => {
+    const { codes: _, ...protocolNoCodes } = { ...PROTOCOL_WITH_ID };
+    const t = connected({
+      protocol: protocolNoCodes as ProtocolSchema,
+    });
+
+    const promise = t.request({ channel: 'test' });
+    const msgId = lastSentId();
+
+    lastInstance()!.simulateMessage({
+      channel: 'test',
+      msgId,
+      code: 'ANYTHING',
+      desc: '',
+      data: { ok: true },
+    });
+
+    const res = await promise;
+    expect(res.code).toBe('ANYTHING');
+    expect(res.data).toEqual({ ok: true });
+    t.destroy();
+  });
+
+  it('resolves all responses when codes is empty object', async () => {
+    const t = connected({
+      protocol: { ...PROTOCOL_WITH_ID, codes: {} },
+    });
+
+    const promise = t.request({ channel: 'test' });
+    const msgId = lastSentId();
+
+    lastInstance()!.simulateMessage({
+      channel: 'test',
+      msgId,
+      code: 'WHATEVER',
+      desc: '',
+      data: {},
+    });
+
+    const res = await promise;
+    expect(res.code).toBe('WHATEVER');
+    t.destroy();
+  });
+
+  it('rejects when error codes include the response code', async () => {
+    const t = connected({
+      protocol: { ...PROTOCOL_WITH_ID, codes: { error: ['ERR', 'AUTH_ERR', 'RATE_LIMIT'] } },
+    });
+
+    const promise = t.request({ channel: 'test' });
+    const msgId = lastSentId();
+
+    lastInstance()!.simulateMessage({
+      channel: 'test',
+      msgId,
+      code: 'AUTH_ERR',
+      desc: 'Unauthorized',
+      data: {},
+    });
+
+    await expect(promise).rejects.toMatchObject({ code: 'AUTH_ERR', response: { description: 'Unauthorized' } });
+    t.destroy();
+  });
+
+  it('resolves non-error responses when only error is defined (no success)', async () => {
+    const t = connected({
+      protocol: { ...PROTOCOL_WITH_ID, codes: { error: ['ERR'] } },
+    });
+
+    const promise = t.request({ channel: 'test' });
+    const msgId = lastSentId();
+
+    lastInstance()!.simulateMessage({
+      channel: 'test',
+      msgId,
+      code: 'SOMETHING_ELSE',
+      desc: '',
+      data: { ok: true },
+    });
+
+    const res = await promise;
+    expect(res.data).toEqual({ ok: true });
+    t.destroy();
+  });
+
+  it('rejects unknown code when success is defined but does not match', async () => {
+    const t = connected({
+      protocol: { ...PROTOCOL_WITH_ID, codes: { success: 'OK' } },
+    });
+
+    const promise = t.request({ channel: 'test' });
+    const msgId = lastSentId();
+
+    lastInstance()!.simulateMessage({
+      channel: 'test',
+      msgId,
+      code: 'UNKNOWN',
+      desc: '',
+      data: {},
+    });
+
+    await expect(promise).rejects.toMatchObject({ code: 'UNKNOWN' });
+    t.destroy();
+  });
+
+  it('interim is ignored when not defined in codes', async () => {
+    const t = connected({
+      protocol: { ...PROTOCOL_WITH_ID, codes: { success: 'OK' } },
+    });
+
+    const promise = t.request({ channel: 'test' });
+    const msgId = lastSentId();
+
+    // A message with code 'PENDING' should NOT be treated as interim
+    // since codes.interim is undefined — it should reject (unknown code).
+    lastInstance()!.simulateMessage({
+      channel: 'test',
+      msgId,
+      code: 'PENDING',
+      desc: '',
+      data: {},
+    });
+
+    await expect(promise).rejects.toMatchObject({ code: 'PENDING' });
+    t.destroy();
+  });
+});
+
 describe('fire()', () => {
   it('calls callback on response', () => {
-    const t = connected();
+    const t = connected({
+      protocol: PROTOCOL_WITH_ID,
+    });
     const fn = vi.fn();
 
     t.fire({ channel: 'ping' }, fn);
@@ -198,7 +380,6 @@ describe('fire()', () => {
     lastInstance()!.simulateMessage({
       channel: 'ping',
       msgId,
-      type: 1,
       code: 'OK',
       desc: 'pong',
       data: {},
@@ -210,7 +391,9 @@ describe('fire()', () => {
   });
 
   it('returns unsubscribe function', () => {
-    const t = connected();
+    const t = connected({
+      protocol: PROTOCOL_WITH_ID,
+    });
     const fn = vi.fn();
 
     const unsub = t.fire({ channel: 'test' }, fn);
@@ -220,7 +403,6 @@ describe('fire()', () => {
     lastInstance()!.simulateMessage({
       channel: 'test',
       msgId,
-      type: 1,
       code: 'OK',
       desc: '',
       data: {},
@@ -241,7 +423,6 @@ describe('addHandler / removeHandler', () => {
     lastInstance()!.simulateMessage({
       channel: 'entrega',
       msgId: 0,
-      type: 1,
       code: 'OK',
       desc: '',
       data: { entrega: [{ id: 1 }] },
@@ -253,7 +434,6 @@ describe('addHandler / removeHandler', () => {
     lastInstance()!.simulateMessage({
       channel: 'entrega',
       msgId: 0,
-      type: 1,
       code: 'OK',
       desc: '',
       data: { entrega: [{ id: 2 }] },
@@ -272,7 +452,6 @@ describe('addHandler / removeHandler', () => {
     lastInstance()!.simulateMessage({
       channel: 'entrega',
       msgId: 0,
-      type: 1,
       code: 'OK',
       desc: '',
       data: {},
@@ -289,7 +468,7 @@ describe('addHandler / removeHandler', () => {
     unsub();
 
     lastInstance()!.simulateMessage({
-      channel: 'x', msgId: 0, type: 1, code: 'OK', desc: '', data: {},
+      channel: 'x', msgId: 0, code: 'OK', desc: '', data: {},
     });
 
     expect(fn).not.toHaveBeenCalled();
@@ -301,7 +480,120 @@ describe('protocol', () => {
   it('exposes read-only protocol on transport', () => {
     const t = connected();
     expect(t.protocol).toBe(t.protocol); // same reference
-    expect(t.protocol.responseTypes.all).toBe(15);
+    expect(t.protocol.fields.requestChannel).toBe('channel');
+    t.destroy();
+  });
+});
+
+// ======================== channel-less protocol ==============================
+
+describe('channel-less protocol', () => {
+  /** Protocol with no requestChannel / responseChannel — like WhiteBit. */
+  const CHANNELLESS_PROTOCOL: ProtocolSchema = {
+    fields: {
+      messageId: 'id',
+      code:      'status',
+      error:     'error',
+      payload:   'params',
+      body:      'result',
+    },
+    codes: {
+      success: undefined,
+      error:   ['ERROR'],
+    },
+    generateId: () => Math.floor(Math.random() * 1_000_000_000) + 1,
+    encode: (msg) => JSON.stringify(msg),
+    decode: (raw) => { try { return JSON.parse(raw); } catch { return null; } },
+    flattenOutgoing: false,
+    includeIdInRequest: true,
+  };
+
+  function connectedChannelless(): Transport {
+    const t = createTransport({
+      url: 'ws://test.local/ws',
+      protocol: CHANNELLESS_PROTOCOL,
+      reconnect: false,
+    });
+    t.connect();
+    lastInstance()!.simulateOpen();
+    return t;
+  }
+
+  it('request() works without channel fields', async () => {
+    const t = connectedChannelless();
+    const ws = lastInstance()!;
+
+    const promise = t.request({ data: { method: 'ping' } });
+
+    // Read the sent message to extract the ID.
+    const sent = JSON.parse(ws.sent[ws.sent.length - 1]);
+    const msgId = sent.id;
+
+    // Simulate response — no channel field, just id + result.
+    ws.simulateMessage({ id: msgId, status: null, error: null, result: { pong: true } });
+
+    const res = await promise;
+    expect(res.channel).toBe('*');
+    expect(res.messageId).toBe(msgId);
+    expect(res.data).toEqual({ pong: true });
+    t.destroy();
+  });
+
+  it('fire() works without channel fields', () => {
+    const t = connectedChannelless();
+    const ws = lastInstance()!;
+    const fn = vi.fn();
+
+    t.fire({ data: { method: 'time' } }, fn);
+
+    const sent = JSON.parse(ws.sent[ws.sent.length - 1]);
+    const msgId = sent.id;
+
+    ws.simulateMessage({ id: msgId, result: { time: 12345 } });
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(fn.mock.calls[0][0].channel).toBe('*');
+    t.destroy();
+  });
+
+  it('send() builds wire message with no channel key', () => {
+    const t = connectedChannelless();
+    const ws = lastInstance()!;
+
+    t.send({ data: { method: 'subscribe', params: ['BTC_USDT'] } });
+
+    const sent = JSON.parse(ws.sent[ws.sent.length - 1]);
+    expect(sent).toHaveProperty('id');
+    expect(sent).toHaveProperty('params');
+    // No channel-like key should exist.
+    expect(sent).not.toHaveProperty('channel');
+    expect(sent).not.toHaveProperty('action');
+    t.destroy();
+  });
+
+  it('request() rejects on error code in channel-less protocol', async () => {
+    const t = connectedChannelless();
+    const ws = lastInstance()!;
+
+    const promise = t.request({ data: { method: 'bad' } });
+    const sent = JSON.parse(ws.sent[ws.sent.length - 1]);
+
+    ws.simulateMessage({ id: sent.id, status: 'ERROR', error: 'Not found', result: {} });
+
+    await expect(promise).rejects.toMatchObject({ code: 'ERROR', error: 'Not found' });
+    t.destroy();
+  });
+
+  it('addHandler on * receives channel-less pushes', () => {
+    const t = connectedChannelless();
+    const ws = lastInstance()!;
+    const fn = vi.fn();
+
+    t.addHandler('*', 'push-listener', fn);
+    // Simulate a spontaneous push with no channel and id=0.
+    ws.simulateMessage({ id: 0, result: { event: 'update' } });
+
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(fn.mock.calls[0][0].channel).toBe('*');
     t.destroy();
   });
 });

@@ -63,7 +63,6 @@ Items completed in the current development cycle. These will be moved to CHANGEL
 - [x] 🟡 Link Emitter generics to TransportEvents for better type safety (removed default type parameter)
 - [x] 🟡 Separate ProtocolFields channel wire name into requestChannel and responseChannel
 - [x] 🟡 Separate ProtocolFields data wire name into payload and body
-- [x] 🟡 Lower cased ResponseTypes for consistency with ProtocolCodes
 
 ---
 

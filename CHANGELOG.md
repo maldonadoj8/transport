@@ -24,7 +24,6 @@ All notable changes to @silas/transport will be documented in this file.
 - **BREAKING**: `ProtocolFields.channel` split into `requestChannel` (outgoing) and `responseChannel` (incoming)
 - **BREAKING**: `ProtocolFields.data` split into `payload` (outgoing) and `body` (incoming)
 - **BREAKING**: `ProtocolCodes` now requires all 8 code fields (was 2)
-- **BREAKING**: `ResponseTypes` keys lowercased: `NONE` → `none`, `SILENT` → `silent`, `MESSAGE` → `message`, `PROCESSING` → `processing`, `ALERT` → `alert`, `ALL` → `all`
 - **BREAKING**: `Emitter<TEvents>` and `createEmitter<TEvents>()` no longer have a default type parameter — callers must provide an explicit event map type
 - `request()` now rejects with a `TransportError` object instead of the raw `IncomingMessage`
 
