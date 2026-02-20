@@ -14,6 +14,7 @@ import type {
   Transport,
   TransportOptions,
   TransportEvents,
+  TransportError,
   IncomingMessage,
   OutgoingMessage,
   RequestOptions,
@@ -21,7 +22,7 @@ import type {
   HandlerCallback,
   ReconnectOptions,
 } from './types.js';
-import { buildOutgoing } from './protocol.js';
+import { buildOutgoing, resolveSchema } from './protocol.js';
 import { createEmitter } from './events.js';
 import { createHandlerStore } from './handlers.js';
 import { createConnection } from './connection.js';
@@ -52,7 +53,7 @@ const DEFAULT_RECONNECT: Required<ReconnectOptions> = {
  */
 export function createTransport(options: TransportOptions): Transport {
   // ---- resolve config ----
-  const schema  = options.protocol;
+  const schema  = resolveSchema(options.protocol);
   const emitter = createEmitter<TransportEvents>();
   const handlers = createHandlerStore();
 
@@ -74,6 +75,10 @@ export function createTransport(options: TransportOptions): Transport {
 
   // ---- generate unique message ID with collision avoidance ----
 
+  function resolveChannel(msg: OutgoingMessage<unknown>): string {
+    return msg.channel ?? '*';
+  }
+
   function newMessageId(channel: string): number {
     let id = schema.generateId();
     // Retry once on collision.
@@ -85,27 +90,32 @@ export function createTransport(options: TransportOptions): Transport {
 
   // ---- public API ----
 
-  function send(msg: OutgoingMessage): void {
-    const id = newMessageId(msg.channel);
+  function send<PData = Record<string, unknown>>(msg: OutgoingMessage<PData>): void {
+    const channel = resolveChannel(msg);
+    const id = newMessageId(channel);
     const wire = buildOutgoing(msg, id, schema);
     connection.send(wire);
   }
 
-  function request(
-    msg: OutgoingMessage,
+  function request<BData = Record<string, unknown>, PData = Record<string, unknown>, E = unknown>(
+    msg: OutgoingMessage<PData>,
     opts?: RequestOptions,
-  ): Promise<IncomingMessage> {
+  ): Promise<IncomingMessage<BData, E>> {
     const timeout = opts?.timeout ?? 30_000;
 
-    return new Promise<IncomingMessage>((resolve, reject) => {
-      const id = newMessageId(msg.channel);
+    return new Promise<IncomingMessage<BData, E>>((resolve, reject) => {
+      const channel = resolveChannel(msg);
+      const id = newMessageId(channel);
+      
       let timer: ReturnType<typeof setTimeout> | null = null;
 
-      const unsub = handlers.add(msg.channel, id, {
+      const unsub = handlers.add(channel, id, {
         type: 'ephemeral',
         callback(response: IncomingMessage): boolean | void {
-          // Interim — keep listening.
-          if (response.code === schema.codes.interim) {
+          const codes = schema.codes;
+
+          // 1. Interim — keep listening.
+          if (codes?.interim && response.code === codes.interim) {
             return false;
           }
 
@@ -115,12 +125,33 @@ export function createTransport(options: TransportOptions): Transport {
             timer = null;
           }
 
-          if (response.code === schema.codes.success) {
-            resolve(response);
-          } else {
-            reject(response);
+          // 2. Explicit error match — reject.
+          if (codes?.error && codes.error.includes(response.code)) {
+            const error: TransportError = {
+              code: response.code,
+              error: response.error,
+              data: response.data,
+              response,
+            };
+            reject(error);
+            return; // auto-remove
           }
-          // Return true (or void) → auto-remove handler.
+
+          // 3. Success: explicit match OR no success code defined (treat all as success).
+          if (!codes?.success || response.code === codes.success) {
+            resolve(response as IncomingMessage<BData, E>);
+            return; // auto-remove
+          }
+
+          // 4. Success code is defined but response doesn't match — treat as error.
+          const error: TransportError = {
+            code: response.code,
+            error: response.error,
+            data: response.data,
+            response,
+          };
+          reject(error);
+          // Return void → auto-remove handler.
         },
       });
 
@@ -130,7 +161,7 @@ export function createTransport(options: TransportOptions): Transport {
           timer = null;
           unsub();
           reject(new Error(
-            `Request timeout after ${timeout}ms: ${msg.channel}`,
+            `Request timeout after ${timeout}ms: ${channel}`,
           ));
         }, timeout);
       }
@@ -141,16 +172,17 @@ export function createTransport(options: TransportOptions): Transport {
     });
   }
 
-  function fire(
-    msg: OutgoingMessage,
-    callback: HandlerCallback,
+  function fire<BData = Record<string, unknown>, PData = Record<string, unknown>, E = unknown>(
+    msg: OutgoingMessage<PData>,
+    callback: HandlerCallback<BData, E>,
     _opts?: FireOptions,
   ): () => void {
-    const id = newMessageId(msg.channel);
+    const channel = resolveChannel(msg);
+    const id = newMessageId(channel);
 
-    const unsub = handlers.add(msg.channel, id, {
+    const unsub = handlers.add(channel, id, {
       type: 'ephemeral',
-      callback,
+      callback: callback as HandlerCallback,
     });
 
     const wire = buildOutgoing(msg, id, schema);
@@ -159,14 +191,14 @@ export function createTransport(options: TransportOptions): Transport {
     return unsub;
   }
 
-  function addHandler(
+  function addHandler<BData = Record<string, unknown>, E = unknown>(
     channel: string,
     name: string,
-    callback: HandlerCallback,
+    callback: HandlerCallback<BData, E>,
   ): () => void {
     return handlers.add(channel, name, {
       type: 'persistent',
-      callback,
+      callback: callback as HandlerCallback,
       name,
     });
   }

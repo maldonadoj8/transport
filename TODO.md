@@ -25,15 +25,13 @@ This document tracks planned features, improvements, and known issues for @silas
 ## Backlog
 
 ### Features & Enhancements
+- Add generics to 
 
 #### Core Functionality
 
 #### API Improvements
-- [ ] 🟡 Expand ProtocolCodes to include more standard codes (e.g. error types, validation failures) 
-- [ ] 🟡 Link Emitter generics to TransportEvents for better type safety
 
 #### Developer Experience
-- [ ] 🟡 Lower cased ResponseTypes for consistency with ProtocolCodes
 
 ### Bugs & Issues
 
@@ -61,6 +59,11 @@ These are ideas that need more discussion or are out of scope for near-term rele
 
 Items completed in the current development cycle. These will be moved to CHANGELOG.md on release.
 
+- [x] 🟡 Expand ProtocolCodes to include more standard codes (error, validationError, unauthorized, notFound, timeout, rateLimited)
+- [x] 🟡 Link Emitter generics to TransportEvents for better type safety (removed default type parameter)
+- [x] 🟡 Separate ProtocolFields channel wire name into requestChannel and responseChannel
+- [x] 🟡 Separate ProtocolFields data wire name into payload and body
+
 ---
 
 ## Notes
@@ -69,4 +72,4 @@ Items completed in the current development cycle. These will be moved to CHANGEL
 
 ---
 
-*Last Updated: 2026-06-15*
+*Last Updated: 2026-02-16*

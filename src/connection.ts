@@ -12,7 +12,7 @@
 // =============================================================================
 
 import type {
-  ProtocolSchema,
+  ResolvedProtocolSchema,
   TransportState,
   TransportEvents,
   ReconnectOptions,
@@ -27,7 +27,7 @@ import { normalizeIncoming } from './protocol.js';
 /** @internal */
 export interface ConnectionDeps {
   /** Resolved protocol schema. */
-  schema: ProtocolSchema;
+  schema: ResolvedProtocolSchema;
   /** Event emitter. */
   emitter: Emitter<TransportEvents>;
   /** Handler store for routing inbound messages. */
@@ -165,8 +165,10 @@ export function createConnection(deps: ConnectionDeps): Connection {
     emitter.emit('message:parsed', message);
 
     // Validate minimum fields.
-    if (!message.channel) {
-      log('Message missing channel field, dropping');
+    // Allow messages through if they have a channel OR a messageId (for ID-only
+    // fallback routing — e.g. responses that omit the channel field).
+    if (!message.channel && message.messageId === 0) {
+      log('Message missing channel and messageId, dropping');
       return;
     }
 

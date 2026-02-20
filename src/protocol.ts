@@ -2,15 +2,53 @@
 // @silas/transport — Protocol
 //
 // Protocol schema helpers for normalizing incoming and building outgoing
-// wire-format messages. Consumers must provide a complete ProtocolSchema
-// when creating a transport — there are no built-in defaults.
+// wire-format messages. Includes `resolveSchema()` which applies sensible
+// defaults so consumers can provide a minimal (or empty) schema.
 // =============================================================================
 
 import type {
   ProtocolSchema,
+  ResolvedProtocolSchema,
   IncomingMessage,
   OutgoingMessage,
 } from './types.js';
+
+// ======================== DEFAULTS ===========================================
+
+/** Cryptographically random 32-bit unsigned integer. */
+function defaultGenerateId(): number {
+  return crypto.getRandomValues(new Uint32Array(1))[0];
+}
+
+function defaultEncode(message: Record<string, unknown>): string {
+  return JSON.stringify(message);
+}
+
+function defaultDecode(raw: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+// ======================== RESOLVE ============================================
+
+/**
+ * Apply defaults to a partial `ProtocolSchema`, producing a fully
+ * resolved schema ready for internal use.
+ */
+export function resolveSchema(input?: ProtocolSchema): ResolvedProtocolSchema {
+  return {
+    fields:             input?.fields             ?? {},
+    codes:              input?.codes,
+    generateId:         input?.generateId         ?? defaultGenerateId,
+    encode:             input?.encode             ?? defaultEncode,
+    decode:             input?.decode             ?? defaultDecode,
+    flattenOutgoing:    input?.flattenOutgoing    ?? false,
+    includeIdInRequest: input?.includeIdInRequest ?? false,
+  };
+}
 
 // ======================== NORMALIZE / BUILD ==================================
 
@@ -21,16 +59,36 @@ import type {
  */
 export function normalizeIncoming(
   raw: Record<string, unknown>,
-  schema: ProtocolSchema,
+  schema: ResolvedProtocolSchema,
 ): IncomingMessage {
   const f = schema.fields;
+
+  // Channel resolution: responseChannel → subscriptionChannel → '*'
+  let channel = '';
+  if (f.responseChannel) {
+    channel = String(raw[f.responseChannel] ?? '');
+  }
+  if (!channel && f.subscriptionChannel) {
+    channel = String(raw[f.subscriptionChannel] ?? '');
+  }
+  if (!channel) {
+    channel = '*';
+  }
+
+  const messageId = f.messageId ? Number(raw[f.messageId] ?? 0) : 0;
+
+  // Event detection: has a resolved channel but no messageId.
+  // For events, prefer eventBody over body.
+  const isEvent = !messageId && channel !== '*';
+  const bodyField = isEvent && f.eventBody ? f.eventBody : f.body;
+
   return {
-    channel:     String(raw[f.channel]     ?? ''),
-    messageId:   Number(raw[f.messageId]   ?? 0),
-    type:        Number(raw[f.type]        ?? 0),
-    code:        String(raw[f.code]        ?? ''),
-    description: String(raw[f.description] ?? ''),
-    data:        (raw[f.data] as Record<string, unknown>) ?? {},
+    channel,
+    messageId,
+    code:        f.code        ? String(raw[f.code] ?? '')            : '',
+    description: f.description ? String(raw[f.description] ?? '')    : '',
+    error:       f.error       ? raw[f.error]                        : undefined,
+    data:        bodyField     ? (raw[bodyField] as Record<string, unknown>) ?? {} : {},
     raw,
   };
 }
@@ -43,26 +101,34 @@ export function normalizeIncoming(
  *
  * If false, data is nested under the data field name.
  */
-export function buildOutgoing(
-  msg: OutgoingMessage,
+export function buildOutgoing<PData = Record<string, unknown>>(
+  msg: OutgoingMessage<PData>,
   messageId: number,
-  schema: ProtocolSchema,
+  schema: ResolvedProtocolSchema,
 ): Record<string, unknown> {
   const f = schema.fields;
-  const wire: Record<string, unknown> = {
-    [f.channel]: msg.channel,
-    [f.messageId]: messageId,
-  };
+  const wire: Record<string, unknown> = {};
+
+  // Only include the channel field when the schema defines a requestChannel.
+  if (f.requestChannel) {
+    wire[f.requestChannel] = msg.channel ?? '*';
+  }
+
+  // Only include the messageId on the wire when the schema opts in or use a default "id" falback field.
+  if (schema.includeIdInRequest) {
+    wire[f.messageId ?? 'id'] = messageId;
+  }
 
   if (msg.data) {
+    const data = msg.data as Record<string, unknown>;
     if (schema.flattenOutgoing) {
       // Flatten: spread data keys onto the root object.
-      for (const key of Object.keys(msg.data)) {
-        wire[key] = msg.data[key];
+      for (const key of Object.keys(data)) {
+        wire[key] = data[key];
       }
-    } else {
+    } else if (f.payload) {
       // Nested: data goes under its own field.
-      wire[f.data] = msg.data;
+      wire[f.payload] = data;
     }
   }
 

@@ -16,8 +16,16 @@ All notable changes to @silas/transport will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `TransportError` interface — structured error object returned by `request()` on non-success responses, with `code`, `description`, `data`, and full `response` fields for programmatic error handling
+- `TransportEmitter` type alias — convenience type for `Emitter<TransportEvents>`
+- Six new error codes in `ProtocolCodes`: `error`, `validationError`, `unauthorized`, `notFound`, `timeout`, `rateLimited`
 
 ### Changed
+- **BREAKING**: `ProtocolFields.channel` split into `requestChannel` (outgoing) and `responseChannel` (incoming)
+- **BREAKING**: `ProtocolFields.data` split into `payload` (outgoing) and `body` (incoming)
+- **BREAKING**: `ProtocolCodes` now requires all 8 code fields (was 2)
+- **BREAKING**: `Emitter<TEvents>` and `createEmitter<TEvents>()` no longer have a default type parameter — callers must provide an explicit event map type
+- `request()` now rejects with a `TransportError` object instead of the raw `IncomingMessage`
 
 ### Deprecated
 
@@ -44,4 +52,4 @@ Initial release.
 
 ---
 
-*Last Updated: 2026-06-15*
+*Last Updated: 2026-02-16*

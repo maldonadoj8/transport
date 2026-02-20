@@ -6,103 +6,181 @@
 
 // ======================== PROTOCOL SCHEMA ====================================
 
-/** Maps protocol field names to the actual wire field names. */
+/** Maps protocol field names to the actual wire field names. All fields are optional. */
 export interface ProtocolFields {
-  /** Field name for the API channel / operation. */
-  channel: string;
-  /** Field name for the unique message ID. */
-  messageId: string;
-  /** Field name for the bitmask response type. */
-  type: string;
-  /** Field name for the result code. */
-  code: string;
-  /** Field name for the human-readable description. */
-  description: string;
-  /** Field name for the data payload. */
-  data: string;
+  /**
+   * Wire field name for the channel on outgoing (request) messages.
+   * When omitted, outgoing messages carry no channel field and the
+   * wildcard `'*'` is used internally for handler routing.
+   */
+  requestChannel?: string;
+  /**
+   * Wire field name for the channel on incoming (response) messages.
+   * When omitted, incoming messages resolve their channel via
+   * `subscriptionChannel` or fall back to the wildcard `'*'`.
+   */
+  responseChannel?: string;
+  /**
+   * Wire field name for the channel on subscription/event messages.
+   * Used as a fallback when `responseChannel` yields no value.
+   * Useful when event messages arrive on a different field than responses
+   * (e.g. Binance uses `"e"` for event type).
+   */
+  subscriptionChannel?: string;
+  /** Field name for the unique message ID. When omitted, defaults to 0. */
+  messageId?: string;
+  /** Field name for the result code. When omitted, defaults to ''. */
+  code?: string;
+  /** Field name for the human-readable description. When omitted, defaults to ''. */
+  description?: string;
+  /**
+   * Wire field name for the error value in the raw response message.
+   * When omitted, `IncomingMessage.error` is `undefined`.
+   * Can be any shape — string, object, etc.
+   */
+  error?: string;
+  /** Wire field name for the data on outgoing (request) messages. When omitted, data is not nested. */
+  payload?: string;
+  /** Wire field name for the data on incoming (response) messages. When omitted, defaults to {}. */
+  body?: string;
+  /**
+   * Wire field name for the data payload in subscription/event messages.
+   * Falls back to `body` when omitted.
+   * Useful when event messages carry data in a different field than responses
+   * (e.g. WhiteBit uses `"result"` for responses and `"params"` for events).
+   */
+  eventBody?: string;
 }
 
-/** Result code values that have special meaning in the protocol. */
+/**
+ * Result code values that have special meaning in the protocol.
+ *
+ * All fields are optional:
+ * - When `success` is undefined, every non-interim, non-error response is
+ *   treated as success.
+ * - When `error` is undefined, no responses are treated as errors (unless
+ *   they fail the success check when success IS defined).
+ * - When `interim` is undefined, no responses are treated as interim.
+ * - When the entire `codes` object is omitted from the schema, all responses
+ *   resolve immediately.
+ */
 export interface ProtocolCodes {
-  /** Value indicating success. */
-  success: string;
-  /** Value indicating an interim/partial response. */
-  interim: string;
+  /** Value indicating success. When undefined, all non-interim/non-error responses succeed. */
+  success?: string;
+  /** Value indicating an interim/partial response (keep listening). */
+  interim?: string;
+  /** Value(s) indicating an error. Multiple codes can be provided. */
+  error?: string[];
 }
 
-/** Bitmask flags for response type routing. */
-export interface ResponseTypes {
-  /** No match / break (0). */
-  NONE: number;
-  /** No visual action (1). */
-  SILENT: number;
-  /** Show toast/snackbar (2). */
-  MESSAGE: number;
-  /** Show/hide loading spinner (4). */
-  PROCESSING: number;
-  /** Show modal/alert (8). */
-  ALERT: number;
-  /** Match everything (15). */
-  ALL: number;
+/**
+ * Structured error returned when `request()` rejects due to a non-success response.
+ * Allows consumers to programmatically branch on the error code.
+ */
+export interface TransportError<E = unknown> {
+  /** The protocol result code (e.g. the value from `ProtocolCodes.error`). */
+  code: string;
+  /** Error value extracted from the response via `ProtocolFields.error`. */
+  error: E;
+  /** Response data payload. */
+  data: Record<string, unknown>;
+  /** The full normalized incoming message for advanced inspection. */
+  response: IncomingMessage<Record<string, unknown>, E>;
 }
 
 /**
  * Injectable protocol schema that describes the wire format.
- * All properties must be provided — there are no defaults.
+ * All properties are optional and have sensible defaults.
  */
 export interface ProtocolSchema {
-  /** Maps canonical field names to wire field names. */
-  fields: ProtocolFields;
-  /** Special result code values. */
-  codes: ProtocolCodes;
-  /** Bitmask response type flags. */
-  responseTypes: ResponseTypes;
-  /** Generate a unique message ID. */
-  generateId: () => number;
-  /** Serialize a message for the wire. */
-  encode: (message: Record<string, unknown>) => string;
-  /** Deserialize a raw wire message. */
-  decode: (raw: string) => Record<string, unknown> | null;
+  /** Maps canonical field names to wire field names. Defaults to `{}`. */
+  fields?: ProtocolFields;
+  /**
+   * Special result code values. When omitted, all responses are treated
+   * as successful (no interim or error classification).
+   */
+  codes?: ProtocolCodes;
+  /**
+   * Generate a unique message ID.
+   * Default: `crypto.getRandomValues` for a cryptographically random 32-bit unsigned integer.
+   */
+  generateId?: () => number;
+  /**
+   * Serialize a message for the wire.
+   * Default: `JSON.stringify`.
+   */
+  encode?: (message: Record<string, unknown>) => string;
+  /**
+   * Deserialize a raw wire message.
+   * Default: `JSON.parse` (returns `null` on failure).
+   */
+  decode?: (raw: string) => Record<string, unknown> | null;
   /**
    * Whether outgoing `data` fields are flattened onto the root message object.
    * When true, `{ channel: 'x', data: { a: 1 } }` becomes `{ action: 'x', a: 1 }`.
-   * When false, data is nested under the data field name.
+   * Default: `false`.
    */
+  flattenOutgoing?: boolean;
+  /**
+   * Whether to include the generated message ID in outgoing request messages.
+   * When true, the `messageId` field is added to the wire message built by
+   * `buildOutgoing`. When false (default), the ID is used only internally for
+   * request/response linking and is not sent on the wire.
+   */
+  includeIdInRequest?: boolean;
+}
+
+/**
+ * Fully resolved protocol schema with all defaults applied.
+ * This is the internal type used throughout the library after calling `resolveSchema()`.
+ */
+export interface ResolvedProtocolSchema {
+  fields: ProtocolFields;
+  codes?: ProtocolCodes;
+  generateId: () => number;
+  encode: (message: Record<string, unknown>) => string;
+  decode: (raw: string) => Record<string, unknown> | null;
   flattenOutgoing: boolean;
+  includeIdInRequest: boolean;
 }
 
 // ======================== MESSAGES ===========================================
 
-/** A normalized incoming message (protocol-agnostic shape). */
-export interface IncomingMessage {
+/** A normalized incoming message (protocol-agnostic shape). 
+*/
+export interface IncomingMessage<BData = Record<string, unknown>, E = unknown> {
   /** The API channel / operation name. */
   channel: string;
   /** The unique message ID (0 = spontaneous server push). */
   messageId: number;
-  /** Bitmask response type. */
-  type: number;
-  /** Result code (e.g. 'OK', 'NEUTRO', error codes). */
+  /** Result code (e.g. success, interim, or error codes). */
   code: string;
   /** Human-readable description. */
   description: string;
+  /** Error value extracted from the response via `ProtocolFields.error`. */
+  error: E;
   /** Response data payload. */
-  data: Record<string, unknown>;
+  data: BData;
   /** The original un-normalized wire message. */
   raw: Record<string, unknown>;
 }
 
 /** Outgoing message to send over the transport. */
-export interface OutgoingMessage {
-  /** The API channel / operation name. */
-  channel: string;
+export interface OutgoingMessage<PData = Record<string, unknown>> {
+  /**
+   * The API channel / operation name.
+   * Optional when the protocol has no `requestChannel` defined — in that
+   * case the wildcard `'*'` is used for internal handler routing.
+   */
+  channel?: string;
   /** Optional data payload. */
-  data?: Record<string, unknown>;
+  data?: PData;
 }
 
 // ======================== HANDLERS ===========================================
 
 /** Callback for handling an incoming message. */
-export type HandlerCallback = (message: IncomingMessage) => boolean | void;
+export type HandlerCallback<BData = Record<string, unknown>, E = unknown> = (message: IncomingMessage<BData, E>) => boolean | void;
 
 /**
  * Unified handler that replaces the separate HANDLERS (persistent) and
@@ -113,9 +191,9 @@ export type HandlerCallback = (message: IncomingMessage) => boolean | void;
  * - ephemeral: auto-removed after handling one definitive response.
  *   Returns false to stay alive (interim pattern).
  */
-export interface Handler {
+export interface Handler<BData = Record<string, unknown>, E = unknown> {
   type: 'persistent' | 'ephemeral';
-  callback: HandlerCallback;
+  callback: HandlerCallback<BData, E>;
   /** Name key for persistent handlers (for deduplication/removal). */
   name?: string;
 }
@@ -138,14 +216,10 @@ export interface ReconnectOptions {
 export interface RequestOptions {
   /** Timeout in ms. 0 = no timeout (default: 30_000). */
   timeout?: number;
-  /** Bitmask filter — which response types to obey (default: ALL = 15). */
-  obey?: number;
 }
 
 /** Options for fire() — callback-based send. */
 export interface FireOptions {
-  /** Bitmask filter (default: ALL = 15). */
-  obey?: number;
 }
 
 /**
@@ -166,8 +240,8 @@ export type TransportState =
 export interface TransportOptions {
   /** WebSocket URL. Can be a string or a function for lazy evaluation. */
   url: string | (() => string);
-  /** Complete protocol schema describing the wire format. Required. */
-  protocol: ProtocolSchema;
+  /** Protocol schema. All fields are optional with sensible defaults. */
+  protocol?: ProtocolSchema;
   /** Reconnection config. Pass false to disable. */
   reconnect?: ReconnectOptions | false;
   /** Enable debug logging (default: false). */
@@ -219,27 +293,27 @@ export interface Transport {
    * Fire-and-forget send.
    * Use request() for Promise-based responses or fire() for callbacks.
    */
-  send(msg: OutgoingMessage): void;
+  send<PData = Record<string, unknown>>(msg: OutgoingMessage<PData>): void;
 
   /**
    * Promise-based send. Resolves on success, rejects on failure or timeout.
-   * Handles NEUTRO interim responses transparently.
+   * Handles interim responses transparently.
    */
-  request(msg: OutgoingMessage, options?: RequestOptions): Promise<IncomingMessage>;
+  request<BData = Record<string, unknown>, PData = Record<string, unknown>, E = unknown>(msg: OutgoingMessage<PData>, options?: RequestOptions): Promise<IncomingMessage<BData, E>>;
 
   /**
    * Callback-based send.
-   * The callback receives each response. Return false to keep listening (NEUTRO).
+   * The callback receives each response. Return false to keep listening (interim).
    * Returns an unsubscribe function.
    */
-  fire(
-    msg: OutgoingMessage,
-    callback: HandlerCallback,
+  fire<BData = Record<string, unknown>, PData = Record<string, unknown>, E = unknown>(
+    msg: OutgoingMessage<PData>,
+    callback: HandlerCallback<BData, E>,
     options?: FireOptions,
   ): () => void;
 
   /** Register a persistent handler. Returns unsubscribe function. */
-  addHandler(channel: string, name: string, callback: HandlerCallback): () => void;
+  addHandler<BData = Record<string, unknown>, E = unknown>(channel: string, name: string, callback: HandlerCallback<BData, E>): () => void;
   /** Remove a persistent handler by name. */
   removeHandler(channel: string, name: string): boolean;
 
@@ -255,7 +329,7 @@ export interface Transport {
   ): () => void;
 
   /** The resolved protocol schema (readonly). */
-  readonly protocol: ProtocolSchema;
+  readonly protocol: ResolvedProtocolSchema;
   /** Toggle debug logging. */
   debug(enabled: boolean): void;
   /** Disconnect, clear all handlers, remove all listeners. */
