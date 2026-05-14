@@ -316,4 +316,82 @@ describe('createHandlerStore', () => {
     // Channel 'b' should still be indexed.
     expect(store.findChannelByMessageId(2)).toBe('b');
   });
+
+  // ---- callback return value edge cases ----
+
+  it('auto-removes ephemeral when callback returns null (not exactly false)', () => {
+    const store = createHandlerStore();
+    const fn = vi.fn(() => null as unknown as boolean);
+    store.add('ch', 1, { type: 'ephemeral', callback: fn });
+
+    store.execute(makeMsg({ channel: 'ch', messageId: 1 }));
+    expect(store.hasEphemeral('ch', 1)).toBe(false);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('auto-removes ephemeral when callback returns undefined (not exactly false)', () => {
+    const store = createHandlerStore();
+    const fn = vi.fn(() => undefined);
+    store.add('ch', 2, { type: 'ephemeral', callback: fn });
+
+    store.execute(makeMsg({ channel: 'ch', messageId: 2 }));
+    expect(store.hasEphemeral('ch', 2)).toBe(false);
+  });
+
+  it('auto-removes ephemeral when callback returns 0 (not exactly false)', () => {
+    const store = createHandlerStore();
+    const fn = vi.fn(() => 0 as unknown as boolean);
+    store.add('ch', 3, { type: 'ephemeral', callback: fn });
+
+    store.execute(makeMsg({ channel: 'ch', messageId: 3 }));
+    expect(store.hasEphemeral('ch', 3)).toBe(false);
+  });
+
+  it('auto-removes ephemeral when callback returns empty string (not exactly false)', () => {
+    const store = createHandlerStore();
+    const fn = vi.fn(() => '' as unknown as boolean);
+    store.add('ch', 4, { type: 'ephemeral', callback: fn });
+
+    store.execute(makeMsg({ channel: 'ch', messageId: 4 }));
+    expect(store.hasEphemeral('ch', 4)).toBe(false);
+  });
+
+  it('keeps handler alive only when callback returns exactly false', () => {
+    const store = createHandlerStore();
+    const fn = vi.fn(() => false as boolean);
+    store.add('ch', 5, { type: 'ephemeral', callback: fn });
+
+    store.execute(makeMsg({ channel: 'ch', messageId: 5 }));
+    expect(store.hasEphemeral('ch', 5)).toBe(true);
+  });
+
+  it('propagates callback throw and does not run subsequent handlers after the matching ephemeral handler', () => {
+    const store = createHandlerStore();
+    const throwing = vi.fn(() => { throw new Error('boom'); });
+    const safe = vi.fn();
+    store.add('ch', 10, { type: 'ephemeral', callback: throwing });
+    store.add('ch', 'after', { type: 'persistent', callback: safe });
+
+    expect(() => store.execute(makeMsg({ channel: 'ch', messageId: 10 }))).toThrow('boom');
+    // Persistent handler on same channel was not reached because ephemeral matched first.
+    expect(safe).not.toHaveBeenCalled();
+  });
+
+  it('handler can remove itself during execution without corrupting store', () => {
+    const store = createHandlerStore();
+    let unsub!: () => void;
+
+    const fn = vi.fn(() => {
+      // Remove self during callback.
+      unsub();
+    });
+
+    unsub = store.add('ch', 'self-remove', { type: 'persistent', callback: fn });
+    store.execute(makeMsg({ channel: 'ch', messageId: 0 }));
+
+    expect(fn).toHaveBeenCalledTimes(1);
+    // Should be removed — second execute should not call fn again.
+    store.execute(makeMsg({ channel: 'ch', messageId: 0 }));
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
 });

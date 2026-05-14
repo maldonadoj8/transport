@@ -306,17 +306,19 @@ describe('auto-reconnect', () => {
     t.on('reconnecting', reconnFn);
 
     t.connect();
-    lastInstance()!.simulateOpen();
+    const originalWs = lastInstance()!;
+    originalWs.simulateOpen();
 
     // Server closes connection.
-    lastInstance()!.simulateClose(1006, 'abnormal');
+    originalWs.simulateClose(1006, 'abnormal');
 
     expect(reconnFn).toHaveBeenCalledWith({ attempt: 1, delayMs: 5000 });
 
     // Advance time to trigger reconnect.
     vi.advanceTimersByTime(5000);
 
-    // A new WebSocket should have been created.
+    // A new WebSocket instance should have been created.
+    expect(lastInstance()).not.toBe(originalWs);
     expect(lastInstance()!.url).toBe('ws://test.local/ws');
     t.destroy();
   });
@@ -375,5 +377,134 @@ describe('destroy', () => {
 
     // State should remain disconnected.
     expect(t.state).toBe('disconnected');
+  });
+});
+
+describe('WebSocket constructor failure', () => {
+  it('emits error and schedules reconnect when WebSocket constructor throws', () => {
+    // Override mock to throw on construction.
+    const original = globalThis.WebSocket;
+    let throwNext = true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).WebSocket = class {
+      constructor() {
+        if (throwNext) throw new Error('Network unreachable');
+      }
+    };
+
+    const t = createTransport({
+      url: 'ws://test.local/ws',
+      protocol: TEST_PROTOCOL,
+      reconnect: { auto: true, delayMs: 1000, backoff: 'fixed' },
+    });
+
+    const errorFn = vi.fn();
+    const reconnFn = vi.fn();
+    t.on('error', errorFn);
+    t.on('reconnecting', reconnFn);
+
+    t.connect();
+
+    expect(errorFn).toHaveBeenCalledTimes(1);
+    expect(reconnFn).toHaveBeenCalledTimes(1);
+
+    // Restore before next test.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).WebSocket = original;
+    t.destroy();
+  });
+});
+
+describe('send failure auto-reconnect', () => {
+  it('schedules reconnect when send is called with a CLOSED socket', () => {
+    const t = createTransport({
+      url: 'ws://test.local/ws',
+      protocol: TEST_PROTOCOL,
+      reconnect: { auto: true, delayMs: 1000, backoff: 'fixed' },
+    });
+
+    const reconnFn = vi.fn();
+    t.on('reconnecting', reconnFn);
+
+    t.connect();
+    const originalWs = lastInstance()!;
+    originalWs.simulateOpen();
+
+    // Force socket to CLOSED state without triggering onClose-driven reconnect.
+    originalWs.readyState = 3; // WS_CLOSED
+
+    const errorFn = vi.fn();
+    t.on('send:error', errorFn);
+
+    t.send({ channel: 'ping' });
+
+    expect(errorFn).toHaveBeenCalledTimes(1);
+
+    // Advance past the 1s send-failure reconnect delay.
+    vi.advanceTimersByTime(1100);
+
+    // A new WebSocket instance should have been created.
+    expect(lastInstance()).not.toBe(originalWs);
+    expect(lastInstance()!.url).toBe('ws://test.local/ws');
+    t.destroy();
+  });
+});
+
+describe('dynamic URL', () => {
+  it('evaluates URL function lazily on each connect', () => {
+    let callCount = 0;
+    const urlFn = vi.fn(() => {
+      callCount++;
+      return `ws://test.local/ws?v=${callCount}`;
+    });
+
+    const t = createTransport({
+      url: urlFn,
+      protocol: TEST_PROTOCOL,
+      reconnect: false,
+    });
+
+    t.connect();
+    expect(urlFn).toHaveBeenCalledTimes(1);
+    expect(lastInstance()!.url).toBe('ws://test.local/ws?v=1');
+
+    // Disconnect and reconnect — URL function called again.
+    lastInstance()!.simulateOpen();
+    t.disconnect();
+    t.connect();
+    expect(urlFn).toHaveBeenCalledTimes(2);
+    expect(lastInstance()!.url).toBe('ws://test.local/ws?v=2');
+
+    t.destroy();
+  });
+});
+
+describe('decode failure', () => {
+  it('silently drops messages when decode returns null', () => {
+    const protocol = {
+      ...TEST_PROTOCOL,
+      decode: (_raw: string) => null, // always fails
+    };
+    const t = createTransport({
+      url: 'ws://test.local/ws',
+      protocol,
+      reconnect: false,
+    });
+
+    const parsedFn = vi.fn();
+    const unhandledFn = vi.fn();
+    t.on('message:parsed', parsedFn);
+    t.on('message:unhandled', unhandledFn);
+
+    t.connect();
+    const ws = lastInstance()!;
+    ws.simulateOpen();
+    ws.simulateMessage({ channel: 'test', msgId: 0, code: 'OK', desc: '', data: {} });
+
+    // Neither event should fire — message dropped silently.
+    expect(parsedFn).not.toHaveBeenCalled();
+    expect(unhandledFn).not.toHaveBeenCalled();
+
+    t.destroy();
   });
 });

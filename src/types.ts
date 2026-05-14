@@ -219,6 +219,7 @@ export interface RequestOptions {
 }
 
 /** Options for fire() — callback-based send. */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface FireOptions {
 }
 

@@ -80,12 +80,17 @@ export function createTransport(options: TransportOptions): Transport {
   }
 
   function newMessageId(channel: string): number {
-    let id = schema.generateId();
-    // Retry once on collision.
-    if (handlers.hasEphemeral(channel, id)) {
-      id = schema.generateId();
+    const MAX_ATTEMPTS = 10;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const id = schema.generateId();
+      if (id > 0 && handlers.findChannelByMessageId(id) === undefined) {
+        return id;
+      }
     }
-    return id;
+    throw new Error(
+      `Failed to generate a unique message ID for channel "${channel}" after ${MAX_ATTEMPTS} attempts. ` +
+      `Check your generateId() implementation.`,
+    );
   }
 
   // ---- public API ----
