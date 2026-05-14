@@ -1,6 +1,6 @@
 {
   "name": "@silasdevs/transport",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Generic WebSocket transport with injectable protocol schema and unified handler system.",
   "type": "module",
   "engines": {
