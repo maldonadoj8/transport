@@ -4,7 +4,7 @@
   "description": "Generic WebSocket transport with injectable protocol schema and unified handler system.",
   "type": "module",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=20.19.0"
   },
   "exports": {
     ".": {

@@ -13,3 +13,5 @@
 **Added**: `TransportEmitter` type alias — convenience type for `Emitter<TransportEvents>`.
 
 **Changed**: `request()` now rejects with a `TransportError` object instead of the raw `IncomingMessage`.
+
+**BREAKING**: Package renamed from `@silas/transport` to `@silasdevs/transport`. Update all import paths and `package.json` dependencies accordingly.
