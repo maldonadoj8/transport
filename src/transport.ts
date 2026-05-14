@@ -83,7 +83,7 @@ export function createTransport(options: TransportOptions): Transport {
     const MAX_ATTEMPTS = 10;
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       const id = schema.generateId();
-      if (handlers.findChannelByMessageId(id) === undefined) {
+      if (id > 0 && handlers.findChannelByMessageId(id) === undefined) {
         return id;
       }
     }

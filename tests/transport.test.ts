@@ -672,6 +672,17 @@ describe('request() edge cases', () => {
     );
     t.destroy();
   });
+
+  it('rejects when generateId always returns 0 (reserved for server pushes)', async () => {
+    const t = connected({
+      protocol: { ...PROTOCOL_WITH_ID, generateId: () => 0 },
+    });
+
+    await expect(t.request({ channel: 'x' })).rejects.toThrow(
+      'Failed to generate a unique message ID',
+    );
+    t.destroy();
+  });
 });
 
 // ======================== auto-reconnect backoff ==============================
