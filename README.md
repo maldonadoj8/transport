@@ -2,7 +2,7 @@
 
 > Generic WebSocket transport with injectable protocol schema, unified handler system, and Promise-based messaging.
 
-Designed as the communication companion to `@silas/core` (state management). Both libraries work together but are fully decoupled — use either one independently.
+Designed as the communication companion to `@silasdevs/core` (state management). Both libraries work together but are fully decoupled — use either one independently.
 
 - **Injectable protocol** — configure wire field names, codes, serialization, and ID generation. No built-in defaults — you define the entire schema.
 - **Channel-optional** — protocols that use named channels (like internal APIs) and channel-less protocols (like WhiteBit, Binance) both work out of the box.
@@ -407,7 +407,7 @@ transport.addHandler('priceUpdate', 'prices', (msg) => { /* ... */ });
 transport.addHandler('*', 'prices', (msg) => { /* ... */ });
 ```
 
-## Integration with @silas/core
+## Integration with @silasdevs/core
 
 The bridge lives in the consumer, not in either library:
 

@@ -319,7 +319,7 @@ describe('createHandlerStore', () => {
 
   // ---- callback return value edge cases ----
 
-  it('treats null return as truthy (auto-removes ephemeral)', () => {
+  it('auto-removes ephemeral when callback returns null (not exactly false)', () => {
     const store = createHandlerStore();
     const fn = vi.fn(() => null as unknown as boolean);
     store.add('ch', 1, { type: 'ephemeral', callback: fn });
@@ -329,7 +329,7 @@ describe('createHandlerStore', () => {
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
-  it('treats undefined return as truthy (auto-removes ephemeral)', () => {
+  it('auto-removes ephemeral when callback returns undefined (not exactly false)', () => {
     const store = createHandlerStore();
     const fn = vi.fn(() => undefined);
     store.add('ch', 2, { type: 'ephemeral', callback: fn });
@@ -338,7 +338,7 @@ describe('createHandlerStore', () => {
     expect(store.hasEphemeral('ch', 2)).toBe(false);
   });
 
-  it('treats 0 return as truthy (auto-removes ephemeral)', () => {
+  it('auto-removes ephemeral when callback returns 0 (not exactly false)', () => {
     const store = createHandlerStore();
     const fn = vi.fn(() => 0 as unknown as boolean);
     store.add('ch', 3, { type: 'ephemeral', callback: fn });
@@ -347,7 +347,7 @@ describe('createHandlerStore', () => {
     expect(store.hasEphemeral('ch', 3)).toBe(false);
   });
 
-  it('treats empty string return as truthy (auto-removes ephemeral)', () => {
+  it('auto-removes ephemeral when callback returns empty string (not exactly false)', () => {
     const store = createHandlerStore();
     const fn = vi.fn(() => '' as unknown as boolean);
     store.add('ch', 4, { type: 'ephemeral', callback: fn });

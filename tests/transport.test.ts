@@ -662,9 +662,9 @@ describe('request() edge cases', () => {
       protocol: { ...PROTOCOL_WITH_ID, generateId: () => 1 },
     });
 
-    // Register 10 ephemeral handlers for id=1 on channel 'x' to saturate the
-    // retry loop (the loop tries the same id each time since generateId is
-    // deterministic, but we need at least one existing entry to trigger it).
+    // Register one ephemeral handler for id=1 on channel 'x'. Since generateId
+    // always returns 1, every retry attempt collides with this single entry,
+    // saturating the retry loop.
     t.fire({ channel: 'x' }, vi.fn());
 
     await expect(t.request({ channel: 'x' })).rejects.toThrow(

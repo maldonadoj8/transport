@@ -207,11 +207,9 @@ describe('Scenario 4: Request timeout', () => {
     const promise = t.request({ channel: 'getUserProfile' }, { timeout: 1000 });
     vi.advanceTimersByTime(1000);
 
-    try {
-      await promise;
-    } catch (err) {
-      expect((err as Error).message).toContain('getUserProfile');
-    }
+    await expect(promise).rejects.toSatisfy(
+      (err: unknown) => (err as Error).message.includes('getUserProfile'),
+    );
 
     t.destroy();
   });
@@ -361,9 +359,7 @@ describe('Scenario 7: Channel-less protocol (ID-only routing)', () => {
 
     ws.simulateMessage({ id: sent.id, status: 'ERROR', error: 'Unauthorized', result: {} });
 
-    const err = await promise.catch((e: TransportError) => e);
-    expect(err.code).toBe('ERROR');
-    expect(err.error).toBe('Unauthorized');
+    await expect(promise).rejects.toMatchObject({ code: 'ERROR', error: 'Unauthorized' });
 
     t.destroy();
   });
