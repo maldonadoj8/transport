@@ -306,17 +306,19 @@ describe('auto-reconnect', () => {
     t.on('reconnecting', reconnFn);
 
     t.connect();
-    lastInstance()!.simulateOpen();
+    const originalWs = lastInstance()!;
+    originalWs.simulateOpen();
 
     // Server closes connection.
-    lastInstance()!.simulateClose(1006, 'abnormal');
+    originalWs.simulateClose(1006, 'abnormal');
 
     expect(reconnFn).toHaveBeenCalledWith({ attempt: 1, delayMs: 5000 });
 
     // Advance time to trigger reconnect.
     vi.advanceTimersByTime(5000);
 
-    // A new WebSocket should have been created.
+    // A new WebSocket instance should have been created.
+    expect(lastInstance()).not.toBe(originalWs);
     expect(lastInstance()!.url).toBe('ws://test.local/ws');
     t.destroy();
   });
@@ -425,11 +427,11 @@ describe('send failure auto-reconnect', () => {
     t.on('reconnecting', reconnFn);
 
     t.connect();
-    const ws = lastInstance()!;
-    ws.simulateOpen();
+    const originalWs = lastInstance()!;
+    originalWs.simulateOpen();
 
     // Force socket to CLOSED state without triggering onClose-driven reconnect.
-    ws.readyState = 3; // WS_CLOSED
+    originalWs.readyState = 3; // WS_CLOSED
 
     const errorFn = vi.fn();
     t.on('send:error', errorFn);
@@ -441,7 +443,8 @@ describe('send failure auto-reconnect', () => {
     // Advance past the 1s send-failure reconnect delay.
     vi.advanceTimersByTime(1100);
 
-    // A new WebSocket should have been created.
+    // A new WebSocket instance should have been created.
+    expect(lastInstance()).not.toBe(originalWs);
     expect(lastInstance()!.url).toBe('ws://test.local/ws');
     t.destroy();
   });

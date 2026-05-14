@@ -174,7 +174,9 @@ export function createConnection(deps: ConnectionDeps): Connection {
 
     // Route to handlers.
     const handled = handlers.execute(message);
-    if (!handled) {
+    if (handled) {
+      log('Handler matched:', message.channel, message.messageId);
+    } else {
       emitter.emit('message:unhandled', message);
       log('Unhandled message:', message.channel, message.messageId);
     }
