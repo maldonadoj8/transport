@@ -597,3 +597,139 @@ describe('channel-less protocol', () => {
     t.destroy();
   });
 });
+
+// ======================== request() edge cases ================================
+
+describe('request() edge cases', () => {
+  it('timeout:0 means no timeout — request waits indefinitely', async () => {
+    const t = connected({ protocol: PROTOCOL_WITH_ID });
+    const promise = t.request({ channel: 'slow' }, { timeout: 0 });
+
+    // Advance far into the future — promise should still be pending.
+    vi.advanceTimersByTime(999_999);
+    let settled = false;
+    promise.then(() => { settled = true; }).catch(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+
+    // Now resolve it normally.
+    const msgId = lastSentId();
+    lastInstance()!.simulateMessage({ channel: 'slow', msgId, code: 'OK', desc: '', data: {} });
+    const res = await promise;
+    expect(res.code).toBe('OK');
+    t.destroy();
+  });
+
+  it('interim response does not reset the timeout counter', async () => {
+    const t = connected({ protocol: PROTOCOL_WITH_ID });
+    const promise = t.request({ channel: 'proceso' }, { timeout: 5000 });
+    const msgId = lastSentId();
+
+    // Send interim at t=3000ms (before timeout).
+    vi.advanceTimersByTime(3000);
+    lastInstance()!.simulateMessage({
+      channel: 'proceso', msgId, code: 'PENDING', desc: '', data: {},
+    });
+
+    // Advance past the original timeout deadline (3000+2001 = 5001ms total).
+    vi.advanceTimersByTime(2001);
+
+    // The original timer was set at t=0 for 5000ms, interim does not reset it.
+    await expect(promise).rejects.toThrow('Request timeout after 5000ms');
+    t.destroy();
+  });
+
+  it('disconnect() while request is pending rejects the promise', async () => {
+    const t = connected({ protocol: PROTOCOL_WITH_ID });
+    const p1 = t.request({ channel: 'a' });
+    const p2 = t.request({ channel: 'b' });
+
+    t.disconnect();
+    // Flush microtask queue.
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Both promises should settle (timeout or connection error).
+    // Advance past default timeout to ensure they reject.
+    vi.advanceTimersByTime(30_001);
+    await expect(p1).rejects.toThrow();
+    await expect(p2).rejects.toThrow();
+    t.destroy();
+  });
+
+  it('rejects when generateId exhausts all retries', async () => {
+    // Deterministic generator that always returns 1.
+    const t = connected({
+      protocol: { ...PROTOCOL_WITH_ID, generateId: () => 1 },
+    });
+
+    // Register 10 ephemeral handlers for id=1 on channel 'x' to saturate the
+    // retry loop (the loop tries the same id each time since generateId is
+    // deterministic, but we need at least one existing entry to trigger it).
+    t.fire({ channel: 'x' }, vi.fn());
+
+    await expect(t.request({ channel: 'x' })).rejects.toThrow(
+      'Failed to generate a unique message ID',
+    );
+    t.destroy();
+  });
+});
+
+// ======================== auto-reconnect backoff ==============================
+
+describe('auto-reconnect exponential backoff', () => {
+  it('doubles delay between reconnect attempts', () => {
+    const t = createTransport({
+      url: 'ws://test.local/ws',
+      protocol: TEST_PROTOCOL,
+      reconnect: { auto: true, delayMs: 1000, backoff: 'exponential' },
+    });
+
+    const delays: number[] = [];
+    t.on('reconnecting', ({ delayMs }) => delays.push(delayMs));
+
+    t.connect();
+    lastInstance()!.simulateOpen();
+
+    // Attempt 1 — delay = 1000 * 2^0 = 1000ms.
+    lastInstance()!.simulateClose(1006);
+    vi.advanceTimersByTime(1000);
+
+    // Attempt 2 — delay = 1000 * 2^1 = 2000ms.
+    lastInstance()!.simulateClose(1006);
+    vi.advanceTimersByTime(2000);
+
+    // Attempt 3 — delay = 1000 * 2^2 = 4000ms.
+    lastInstance()!.simulateClose(1006);
+    vi.advanceTimersByTime(4000);
+
+    expect(delays).toEqual([1000, 2000, 4000]);
+    t.destroy();
+  });
+
+  it('caps exponential backoff at 60s', () => {
+    const t = createTransport({
+      url: 'ws://test.local/ws',
+      protocol: TEST_PROTOCOL,
+      reconnect: { auto: true, delayMs: 10_000, backoff: 'exponential' },
+    });
+
+    const delays: number[] = [];
+    t.on('reconnecting', ({ delayMs }) => delays.push(delayMs));
+
+    t.connect();
+    lastInstance()!.simulateOpen();
+
+    // Simulate many failures to push past the 60s cap.
+    // 10000 * 2^3 = 80000 → capped at 60000.
+    for (let i = 0; i < 4; i++) {
+      lastInstance()!.simulateClose(1006);
+      vi.advanceTimersByTime(60_001);
+    }
+
+    // All delays after the cap should be exactly 60000.
+    const capped = delays.filter(d => d >= 60_000);
+    expect(capped.length).toBeGreaterThan(0);
+    expect(Math.max(...delays)).toBe(60_000);
+    t.destroy();
+  });
+});

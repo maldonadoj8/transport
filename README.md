@@ -1,4 +1,4 @@
-# @silas/transport
+# @silasdevs/transport
 
 > Generic WebSocket transport with injectable protocol schema, unified handler system, and Promise-based messaging.
 
@@ -15,14 +15,14 @@ Designed as the communication companion to `@silas/core` (state management). Bot
 ## Installation
 
 ```bash
-npm install @silas/transport
+npm install @silasdevs/transport
 ```
 
 ## Quick Start
 
 ```ts
-import { createTransport } from '@silas/transport';
-import type { ProtocolSchema } from '@silas/transport';
+import { createTransport } from '@silasdevs/transport';
+import type { ProtocolSchema } from '@silasdevs/transport';
 
 const protocol: ProtocolSchema = {
   fields: {
@@ -116,6 +116,8 @@ transport.addHandler('*', 'push-listener', (msg) => {
 Resolves on success, rejects on failure or timeout. Interim responses are handled transparently.
 
 ```ts
+import type { TransportError } from '@silasdevs/transport';
+
 try {
   const res = await transport.request(
     { channel: 'usuario', data: { id: 5 } },
@@ -124,30 +126,46 @@ try {
   console.log(res.code); // 'OK'
   console.log(res.data); // server payload
 } catch (err) {
-  // err is a TransportError on failure, or an Error on timeout
+  if (err instanceof Error) {
+    // Timeout or network error (plain Error).
+    console.error('Timeout or connection error:', err.message);
+  } else {
+    // Protocol-level failure — TransportError shape.
+    const e = err as TransportError;
+    console.error('Protocol error:', e.code, e.error, e.data);
+  }
 }
 ```
 
+**Timeout behaviour:**
+- `timeout` defaults to `30_000` ms.
+- Pass `timeout: 0` to disable the timeout entirely (request waits indefinitely).
+- Interim responses (`codes.interim`) do **not** reset the timer. The clock starts when `request()` is called and the same deadline applies throughout.
+- On timeout the promise rejects with a plain `Error` (not a `TransportError`), so `err instanceof Error` reliably identifies timeouts.
+- If `disconnect()` is called while a request is pending the promise rejects when the timeout fires (no early rejection).
+
 ### `fire()` — Callback-based
 
-Return `false` to keep listening (interim pattern).
+Return `false` to keep the handler alive (interim pattern). The callback receives **every** message including interim ones — unlike `request()` it does not skip them.
 
 ```ts
 const unsub = transport.fire(
   { channel: 'proceso', data: { id: 1 } },
   (msg) => {
     if (msg.code === 'PENDING') {
-      console.log('Still processing...');
-      return false; // keep listening
+      console.log('Still processing...', msg.data);
+      return false; // keep listening — handler stays registered
     }
     console.log('Done:', msg.data);
-    // returns void → auto-remove handler
+    // return void/true → auto-remove handler
   },
 );
 
 // Cancel early if needed
 unsub();
 ```
+
+> **Note:** `fire()` has no built-in timeout. Use the returned `unsub()` to cancel if necessary.
 
 ### `send()` — Fire-and-forget
 
@@ -174,7 +192,9 @@ unsub(); // or transport.removeHandler('entrega', 'my-sync')
 // Ephemeral — created automatically by request() and fire()
 ```
 
-Ephemeral handlers auto-remove when the callback returns `true` or `void`. Return `false` to keep alive (interim pattern).
+Ephemeral handlers auto-remove when the callback returns anything other than exactly `false` (including `void`, `true`, `null`, `0`, `""`). Return `false` to keep alive (interim pattern).
+
+**Handler execution order:** persistent handlers execute in the order they were registered. Ephemeral handlers take priority over persistent handlers for the same (channel, messageId) pair.
 
 ### Handler Routing
 
@@ -333,10 +353,10 @@ const transport = createTransport({
   url: 'wss://api.example.com/ws',
   protocol,
   reconnect: {
-    auto: true,           // default: true
-    delayMs: 10_000,      // default: 10s
+    auto: true,            // default: true
+    delayMs: 10_000,       // default: 10s
     maxAttempts: Infinity, // default: Infinity
-    backoff: 'fixed',     // 'fixed' | 'exponential' (default: 'fixed')
+    backoff: 'fixed',      // 'fixed' | 'exponential' (default: 'fixed')
   },
 });
 
@@ -348,13 +368,52 @@ const transport2 = createTransport({
 });
 ```
 
+**Backoff strategies:**
+- `'fixed'` — waits exactly `delayMs` between every attempt.
+- `'exponential'` — delay doubles each attempt: `delayMs × 2^attempt`, capped at **60 seconds**.
+  - Example with `delayMs: 1000`: 1 s → 2 s → 4 s → 8 s → … → 60 s
+
+**`disconnect({ clean: true })`** — setting `clean: true` additionally clears all stale ephemeral handlers (request/response pairs that will never resolve). Without `clean`, persistent handlers remain registered.
+
+**Reconnect on send failure:** if `send()` is called while the socket is closed or closing and `reconnect.auto` is `true`, a reconnect attempt is scheduled with a 1 s delay.
+
+## Debug Logging
+
+Pass `debug: true` to enable console logging for all connection lifecycle events, sends, receives, and handler routing:
+
+```ts
+const transport = createTransport({
+  url: 'wss://api.example.com/ws',
+  protocol,
+  debug: true, // logs to console.log with '[silas/transport]' prefix
+});
+
+// Toggle at runtime
+transport.debug(true);
+transport.debug(false);
+```
+
+Logged events include: connecting, connected, disconnected, reconnecting, send (before/after/error), message received, message decoded, handler matched/unmatched.
+
+## Channel-less Protocol Gotcha
+
+If your protocol has no `responseChannel` defined, incoming messages always resolve to channel `'*'`. Persistent handlers registered on a **named** channel will **never** fire for those messages:
+
+```ts
+// ❌ Will never fire — no responseChannel means all messages arrive on '*'.
+transport.addHandler('priceUpdate', 'prices', (msg) => { /* ... */ });
+
+// ✅ Register on '*' to receive all channel-less pushes.
+transport.addHandler('*', 'prices', (msg) => { /* ... */ });
+```
+
 ## Integration with @silas/core
 
 The bridge lives in the consumer, not in either library:
 
 ```ts
-import { createTransport } from '@silas/transport';
-import { createStore, defineSchema } from '@silas/core/store';
+import { createTransport } from '@silasdevs/transport';
+import { createStore, defineSchema } from '@silasdevs/core/store';
 
 const store = createStore({
   schema: defineSchema({
@@ -438,10 +497,11 @@ import type {
   TransportState,
   TransportEvents,
   TransportError,
+  TransportEmitter,
   ReconnectOptions,
   RequestOptions,
   FireOptions,
-} from '@silas/transport';
+} from '@silasdevs/transport';
 ```
 
 ## License

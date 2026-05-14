@@ -453,3 +453,69 @@ describe('resolveSchema', () => {
     expect(schema.encode).toBe(customEncode);
   });
 });
+
+// ======================== normalizeIncoming edge cases =======================
+
+describe('normalizeIncoming — edge cases', () => {
+  it('coerces non-numeric messageId to 0', () => {
+    const schema = testProtocol();
+    const raw = { action: 'test', reqId: 'not-a-number', status: 'OK' };
+    const msg = normalizeIncoming(raw, schema);
+    expect(msg.messageId).toBe(0);
+  });
+
+  it('coerces NaN messageId to 0', () => {
+    const schema = testProtocol();
+    const raw = { action: 'test', reqId: NaN, status: 'OK' };
+    const msg = normalizeIncoming(raw, schema);
+    expect(msg.messageId).toBe(0);
+  });
+
+  it('treats empty string channel as wildcard *', () => {
+    const schema = testProtocol();
+    // Action field present but empty string value.
+    const raw = { action: '', reqId: 1, status: 'OK' };
+    const msg = normalizeIncoming(raw, schema);
+    // Empty responseChannel falls back to subscriptionChannel (none defined)
+    // then to '*'.
+    expect(msg.channel).toBe('*');
+  });
+
+  it('eventBody takes precedence over body for event messages (messageId=0)', () => {
+    const schema = testProtocol({
+      fields: {
+        responseChannel:     'method',
+        subscriptionChannel: 'event',
+        messageId:           'reqId',
+        code:                'status',
+        body:                'result',
+        eventBody:           'params',
+      },
+    });
+    // Event: messageId=0, channel via subscriptionChannel.
+    const raw = { event: 'trade_update', reqId: 0, params: [1, 2, 3], result: { stale: true } };
+    const msg = normalizeIncoming(raw, schema);
+    expect(msg.channel).toBe('trade_update');
+    expect(msg.messageId).toBe(0);
+    // Should use params (eventBody), not result (body).
+    expect(msg.data).toEqual([1, 2, 3]);
+  });
+
+  it('body is used for response messages (messageId>0) even when eventBody defined', () => {
+    const schema = testProtocol({
+      fields: {
+        responseChannel: 'method',
+        messageId:       'reqId',
+        code:            'status',
+        body:            'result',
+        eventBody:       'params',
+      },
+    });
+    // Response: messageId > 0.
+    const raw = { method: 'order_create', reqId: 55, status: 'OK', result: { id: 100 }, params: ['stale'] };
+    const msg = normalizeIncoming(raw, schema);
+    expect(msg.messageId).toBe(55);
+    // Should use result (body), not params (eventBody).
+    expect(msg.data).toEqual({ id: 100 });
+  });
+});

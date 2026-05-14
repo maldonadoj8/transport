@@ -75,7 +75,8 @@ export function normalizeIncoming(
     channel = '*';
   }
 
-  const messageId = f.messageId ? Number(raw[f.messageId] ?? 0) : 0;
+  const rawId = f.messageId ? Number(raw[f.messageId] ?? 0) : 0;
+  const messageId = Number.isNaN(rawId) ? 0 : rawId;
 
   // Event detection: has a resolved channel but no messageId.
   // For events, prefer eventBody over body.

@@ -1,8 +1,11 @@
 {
-  "name": "@silas/transport",
+  "name": "@silasdevs/transport",
   "version": "0.1.0",
   "description": "Generic WebSocket transport with injectable protocol schema and unified handler system.",
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -23,13 +26,22 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "lint": "eslint src/",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
+    "@changesets/changelog-github": "^0.6.0",
+    "@changesets/cli": "^2.31.0",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.19.17",
+    "@vitest/coverage-v8": "^2.0.0",
+    "eslint": "^10.2.1",
     "tsup": "^8.0.0",
-    "vitest": "^2.0.0",
-    "@vitest/coverage-v8": "^2.0.0"
+    "typescript": "^5.4.0",
+    "typescript-eslint": "^8.58.2",
+    "vitest": "^2.0.0"
   },
   "keywords": [
     "websocket",
@@ -42,6 +54,13 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/silas/transport.git"
+    "url": "https://github.com/maldonadoj8/transport.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "overrides": {
+    "@types/node": "$@types/node",
+    "picomatch": "^4.0.4"
   }
 }
