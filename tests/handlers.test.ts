@@ -365,7 +365,7 @@ describe('createHandlerStore', () => {
     expect(store.hasEphemeral('ch', 5)).toBe(true);
   });
 
-  it('does not propagate callback throw — subsequent handlers still run', () => {
+  it('propagates callback throw and does not run subsequent handlers after the matching ephemeral handler', () => {
     const store = createHandlerStore();
     const throwing = vi.fn(() => { throw new Error('boom'); });
     const safe = vi.fn();
