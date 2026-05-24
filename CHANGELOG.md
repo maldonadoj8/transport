@@ -1,5 +1,11 @@
 # @silasdevs/transport
 
+## 1.1.0
+
+### Minor Changes
+
+- [#7](https://github.com/maldonadoj8/transport/pull/7) [`be6669a`](https://github.com/maldonadoj8/transport/commit/be6669a47931a92a8b0dcea9228a74a98f96caab) Thanks [@maldonadoj8](https://github.com/maldonadoj8)! - Simplify logging of received messages in createConnection
+
 ## 1.0.1
 
 ### Patch Changes
