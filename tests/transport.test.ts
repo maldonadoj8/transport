@@ -115,6 +115,31 @@ describe('send()', () => {
     expect(typeof parsed.msgId).toBe('number');
     t.destroy();
   });
+
+  it('flattens data with opts.flattenOutgoing=true overriding schema default of false', () => {
+    const t = connected({
+      protocol: { ...TEST_PROTOCOL, flattenOutgoing: false },
+    });
+    t.send({ channel: 'x', data: { a: 1 } }, { flattenOutgoing: true });
+
+    const ws = lastInstance()!;
+    const parsed = JSON.parse(ws.sent[ws.sent.length - 1]);
+    // data key 'a' should be on root, NOT nested under 'data'
+    expect(parsed.a).toBe(1);
+    expect(parsed).not.toHaveProperty('data');
+    t.destroy();
+  });
+
+  it('nests data with opts.flattenOutgoing=false overriding schema default of true', () => {
+    const t = connected(); // TEST_PROTOCOL has flattenOutgoing: true
+    t.send({ channel: 'x', data: { a: 1 } }, { flattenOutgoing: false });
+
+    const ws = lastInstance()!;
+    const parsed = JSON.parse(ws.sent[ws.sent.length - 1]);
+    expect(parsed.data).toEqual({ a: 1 });
+    expect(parsed).not.toHaveProperty('a');
+    t.destroy();
+  });
 });
 
 describe('request()', () => {
@@ -234,6 +259,46 @@ describe('request()', () => {
     vi.advanceTimersByTime(5000);
 
     await expect(promise).rejects.toThrow('Request timeout after 5000ms');
+    t.destroy();
+  });
+
+  it('nests data with opts.flattenOutgoing=false overriding schema default of true', async () => {
+    const t = connected({ protocol: PROTOCOL_WITH_ID }); // flattenOutgoing: true
+    const promise = t.request(
+      { channel: 'usuario', data: { id: 5 } },
+      { flattenOutgoing: false },
+    );
+
+    const ws = lastInstance()!;
+    const sent = JSON.parse(ws.sent[ws.sent.length - 1]);
+    // data should be nested under 'data' field, not spread onto root
+    expect(sent.data).toEqual({ id: 5 });
+    expect(sent).not.toHaveProperty('id');
+
+    // resolve so the promise doesn't dangle
+    const msgId = sent.msgId;
+    ws.simulateMessage({ channel: 'usuario', msgId, code: 'OK', desc: '', data: {} });
+    await promise;
+    t.destroy();
+  });
+
+  it('flattens data with opts.flattenOutgoing=true overriding schema default of false', async () => {
+    const t = connected({
+      protocol: { ...PROTOCOL_WITH_ID, flattenOutgoing: false },
+    });
+    const promise = t.request(
+      { channel: 'usuario', data: { id: 5 } },
+      { flattenOutgoing: true },
+    );
+
+    const ws = lastInstance()!;
+    const sent = JSON.parse(ws.sent[ws.sent.length - 1]);
+    expect(sent.id).toBe(5);
+    expect(sent).not.toHaveProperty('data');
+
+    const msgId = sent.msgId;
+    ws.simulateMessage({ channel: 'usuario', msgId, code: 'OK', desc: '', data: {} });
+    await promise;
     t.destroy();
   });
 });
@@ -409,6 +474,30 @@ describe('fire()', () => {
     });
 
     expect(fn).not.toHaveBeenCalled();
+    t.destroy();
+  });
+
+  it('nests data with opts.flattenOutgoing=false overriding schema default of true', () => {
+    const t = connected({ protocol: PROTOCOL_WITH_ID }); // flattenOutgoing: true
+    t.fire({ channel: 'x', data: { a: 1 } }, vi.fn(), { flattenOutgoing: false });
+
+    const ws = lastInstance()!;
+    const sent = JSON.parse(ws.sent[ws.sent.length - 1]);
+    expect(sent.data).toEqual({ a: 1 });
+    expect(sent).not.toHaveProperty('a');
+    t.destroy();
+  });
+
+  it('flattens data with opts.flattenOutgoing=true overriding schema default of false', () => {
+    const t = connected({
+      protocol: { ...PROTOCOL_WITH_ID, flattenOutgoing: false },
+    });
+    t.fire({ channel: 'x', data: { a: 1 } }, vi.fn(), { flattenOutgoing: true });
+
+    const ws = lastInstance()!;
+    const sent = JSON.parse(ws.sent[ws.sent.length - 1]);
+    expect(sent.a).toBe(1);
+    expect(sent).not.toHaveProperty('data');
     t.destroy();
   });
 });

@@ -121,7 +121,7 @@ import type { TransportError } from '@silasdevs/transport';
 try {
   const res = await transport.request(
     { channel: 'usuario', data: { id: 5 } },
-    { timeout: 10_000 },
+    { timeout: 10_000, flattenOutgoing: false }, // override schema default for this call
   );
   console.log(res.code); // 'OK'
   console.log(res.data); // server payload
@@ -171,6 +171,9 @@ unsub();
 
 ```ts
 transport.send({ channel: 'ping' });
+
+// Override flattenOutgoing for this call only
+transport.send({ channel: 'cmd', data: { id: 1 } }, { flattenOutgoing: false });
 ```
 
 ## Handlers
@@ -243,7 +246,7 @@ All fields are optional. When the entire `codes` object is omitted, all response
 | `generateId` | Yes | Function that generates a unique numeric message ID. |
 | `encode` | Yes | Serialize a message object to a string for the wire. |
 | `decode` | Yes | Deserialize a raw wire string to an object (return `null` on failure). |
-| `flattenOutgoing` | Yes | `true` = spread data onto root; `false` = nest under payload field. |
+| `flattenOutgoing` | No | Default `true`/`false` — spread data onto root or nest under payload field. Can be overridden per call. |
 | `includeIdInRequest` | No | `true` = include messageId on the wire; `false` (default) = ID used internally only. |
 
 ### Example: Channel-based Protocol
@@ -453,9 +456,9 @@ transport.connect();
 |---|---|
 | `connect()` | Open WebSocket (idempotent) |
 | `disconnect({ clean? })` | Close WebSocket |
-| `request(msg, opts?)` | Promise-based send |
-| `fire(msg, cb, opts?)` | Callback-based send |
-| `send(msg)` | Fire-and-forget send |
+| `request(msg, opts?)` | Promise-based send (`RequestOptions`: `timeout`, `flattenOutgoing`) |
+| `fire(msg, cb, opts?)` | Callback-based send (`FireOptions`: `flattenOutgoing`) |
+| `send(msg, opts?)` | Fire-and-forget send (`SendOptions`: `flattenOutgoing`) |
 | `addHandler(channel, name, cb)` | Register persistent handler |
 | `removeHandler(channel, name)` | Remove persistent handler |
 | `on(event, cb)` | Subscribe to lifecycle event |
@@ -501,6 +504,7 @@ import type {
   ReconnectOptions,
   RequestOptions,
   FireOptions,
+  SendOptions,
 } from '@silasdevs/transport';
 ```
 
