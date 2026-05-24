@@ -1,5 +1,11 @@
 # @silasdevs/transport
 
+## 1.2.0
+
+### Minor Changes
+
+- [#9](https://github.com/maldonadoj8/transport/pull/9) [`e910765`](https://github.com/maldonadoj8/transport/commit/e910765e29739ef9e7a7a9c0ebe02ec4bb1abaed) Thanks [@maldonadoj8](https://github.com/maldonadoj8)! - Update logging for unhandled messages to include full message object
+
 ## 1.1.0
 
 ### Minor Changes
