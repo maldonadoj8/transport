@@ -1,5 +1,11 @@
 # @silasdevs/transport
 
+## 1.0.1
+
+### Patch Changes
+
+- [#5](https://github.com/maldonadoj8/transport/pull/5) [`97c8b4c`](https://github.com/maldonadoj8/transport/commit/97c8b4cc5e42966486b3698c252c44d2c1fece68) Thanks [@maldonadoj8](https://github.com/maldonadoj8)! - add per-call flattenOutgoing option for message handling
+
 ## 1.0.0
 
 ### Major Changes
