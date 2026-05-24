@@ -178,7 +178,7 @@ export function createConnection(deps: ConnectionDeps): Connection {
       log('Handler matched:', message.channel, message.messageId);
     } else {
       emitter.emit('message:unhandled', message);
-      log('Unhandled message:', message.channel, message.messageId);
+      log('Unhandled message:', message);
     }
   }
 
