@@ -354,6 +354,46 @@ describe('buildOutgoing', () => {
     const wire = buildOutgoing({}, 3, schema);
     expect(wire).toEqual({ id: 3 });
   });
+
+  it('per-call override: flattenOutgoing=false overrides schema default of true', () => {
+    const schema = testProtocol({ flattenOutgoing: true }); // schema says flatten
+    const wire = buildOutgoing(
+      { channel: 'usuario', data: { id: 5 } },
+      42,
+      schema,
+      false, // override: nest instead
+    );
+    expect(wire).toEqual({
+      action: 'usuario',
+      payload: { id: 5 },
+    });
+  });
+
+  it('per-call override: flattenOutgoing=true overrides schema default of false', () => {
+    const schema = testProtocol({ flattenOutgoing: false }); // schema says nest
+    const wire = buildOutgoing(
+      { channel: 'usuario', data: { id: 5, nombre: 'Ana' } },
+      42,
+      schema,
+      true, // override: flatten instead
+    );
+    expect(wire).toEqual({
+      action: 'usuario',
+      id: 5,
+      nombre: 'Ana',
+    });
+  });
+
+  it('per-call override: undefined falls back to schema value', () => {
+    const schema = testProtocol({ flattenOutgoing: true });
+    const wire = buildOutgoing(
+      { channel: 'x', data: { a: 1 } },
+      1,
+      schema,
+      undefined, // no override — should use schema
+    );
+    expect(wire).toEqual({ action: 'x', a: 1 });
+  });
 });
 
 // ======================== channel-less protocol ==============================

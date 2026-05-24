@@ -161,7 +161,11 @@ export function createConnection(deps: ConnectionDeps): Connection {
 
     // Normalize to canonical shape.
     const message: IncomingMessage = normalizeIncoming(parsed, schema);
-    log('←', message.channel, message.messageId, message.code);
+    log('(Received) ← ', {
+      raw: raw,
+      parsed: parsed,
+      normalized: message,
+    });
     emitter.emit('message:parsed', message);
 
     // Validate minimum fields.
@@ -261,7 +265,7 @@ export function createConnection(deps: ConnectionDeps): Connection {
     }
 
     const encoded = schema.encode(payload);
-    log('→', payload);
+    log('(Sent) →', payload);
     ws.send(encoded);
     emitter.emit('send:after', { payload });
   }

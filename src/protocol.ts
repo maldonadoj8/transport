@@ -101,11 +101,15 @@ export function normalizeIncoming(
  * alongside the channel and message ID fields.
  *
  * If false, data is nested under the data field name.
+ *
+ * The optional `flattenOutgoing` parameter overrides the schema-level default
+ * for a single call. When omitted, `schema.flattenOutgoing` is used.
  */
 export function buildOutgoing<PData = Record<string, unknown>>(
   msg: OutgoingMessage<PData>,
   messageId: number,
   schema: ResolvedProtocolSchema,
+  flattenOutgoing?: boolean,
 ): Record<string, unknown> {
   const f = schema.fields;
   const wire: Record<string, unknown> = {};
@@ -122,7 +126,8 @@ export function buildOutgoing<PData = Record<string, unknown>>(
 
   if (msg.data) {
     const data = msg.data as Record<string, unknown>;
-    if (schema.flattenOutgoing) {
+    const shouldFlatten = flattenOutgoing ?? schema.flattenOutgoing;
+    if (shouldFlatten) {
       // Flatten: spread data keys onto the root object.
       for (const key of Object.keys(data)) {
         wire[key] = data[key];

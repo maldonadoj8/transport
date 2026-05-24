@@ -38,6 +38,7 @@ export type {
   ReconnectOptions,
   RequestOptions,
   FireOptions,
+  SendOptions,
 } from './types.js';
 
 // Convenience alias: typed emitter bound to TransportEvents.

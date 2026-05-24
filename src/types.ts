@@ -216,11 +216,35 @@ export interface ReconnectOptions {
 export interface RequestOptions {
   /** Timeout in ms. 0 = no timeout (default: 30_000). */
   timeout?: number;
+  /**
+   * Override the schema-level `flattenOutgoing` for this request only.
+   * When true, data keys are spread onto the root message object.
+   * When false, data is nested under the payload field.
+   * When omitted, the schema default is used.
+   */
+  flattenOutgoing?: boolean;
 }
 
 /** Options for fire() — callback-based send. */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface FireOptions {
+  /**
+   * Override the schema-level `flattenOutgoing` for this call only.
+   * When true, data keys are spread onto the root message object.
+   * When false, data is nested under the payload field.
+   * When omitted, the schema default is used.
+   */
+  flattenOutgoing?: boolean;
+}
+
+/** Options for send() — fire-and-forget send. */
+export interface SendOptions {
+  /**
+   * Override the schema-level `flattenOutgoing` for this call only.
+   * When true, data keys are spread onto the root message object.
+   * When false, data is nested under the payload field.
+   * When omitted, the schema default is used.
+   */
+  flattenOutgoing?: boolean;
 }
 
 /**
@@ -294,7 +318,7 @@ export interface Transport {
    * Fire-and-forget send.
    * Use request() for Promise-based responses or fire() for callbacks.
    */
-  send<PData = Record<string, unknown>>(msg: OutgoingMessage<PData>): void;
+  send<PData = Record<string, unknown>>(msg: OutgoingMessage<PData>, opts?: SendOptions): void;
 
   /**
    * Promise-based send. Resolves on success, rejects on failure or timeout.

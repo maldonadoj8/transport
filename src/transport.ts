@@ -19,6 +19,7 @@ import type {
   OutgoingMessage,
   RequestOptions,
   FireOptions,
+  SendOptions,
   HandlerCallback,
   ReconnectOptions,
 } from './types.js';
@@ -95,10 +96,10 @@ export function createTransport(options: TransportOptions): Transport {
 
   // ---- public API ----
 
-  function send<PData = Record<string, unknown>>(msg: OutgoingMessage<PData>): void {
+  function send<PData = Record<string, unknown>>(msg: OutgoingMessage<PData>, opts?: SendOptions): void {
     const channel = resolveChannel(msg);
     const id = newMessageId(channel);
-    const wire = buildOutgoing(msg, id, schema);
+    const wire = buildOutgoing(msg, id, schema, opts?.flattenOutgoing);
     connection.send(wire);
   }
 
@@ -172,7 +173,7 @@ export function createTransport(options: TransportOptions): Transport {
       }
 
       // Send.
-      const wire = buildOutgoing(msg, id, schema);
+      const wire = buildOutgoing(msg, id, schema, opts?.flattenOutgoing);
       connection.send(wire);
     });
   }
@@ -180,7 +181,7 @@ export function createTransport(options: TransportOptions): Transport {
   function fire<BData = Record<string, unknown>, PData = Record<string, unknown>, E = unknown>(
     msg: OutgoingMessage<PData>,
     callback: HandlerCallback<BData, E>,
-    _opts?: FireOptions,
+    opts?: FireOptions,
   ): () => void {
     const channel = resolveChannel(msg);
     const id = newMessageId(channel);
@@ -190,7 +191,7 @@ export function createTransport(options: TransportOptions): Transport {
       callback: callback as HandlerCallback,
     });
 
-    const wire = buildOutgoing(msg, id, schema);
+    const wire = buildOutgoing(msg, id, schema, opts?.flattenOutgoing);
     connection.send(wire);
 
     return unsub;
