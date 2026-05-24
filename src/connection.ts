@@ -161,11 +161,7 @@ export function createConnection(deps: ConnectionDeps): Connection {
 
     // Normalize to canonical shape.
     const message: IncomingMessage = normalizeIncoming(parsed, schema);
-    log('(Received) ← ', {
-      raw: raw,
-      parsed: parsed,
-      normalized: message,
-    });
+    log('(Received) ← ', parsed);
     emitter.emit('message:parsed', message);
 
     // Validate minimum fields.
