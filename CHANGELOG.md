@@ -1,5 +1,11 @@
 # @silasdevs/transport
 
+## 1.2.1
+
+### Patch Changes
+
+- [#11](https://github.com/maldonadoj8/transport/pull/11) [`6c32fad`](https://github.com/maldonadoj8/transport/commit/6c32fada82abdd495b7f65700b384cdc76ba7cb8) Thanks [@maldonadoj8](https://github.com/maldonadoj8)! - Enhance logging for matched handlers to include message code
+
 ## 1.2.0
 
 ### Minor Changes
